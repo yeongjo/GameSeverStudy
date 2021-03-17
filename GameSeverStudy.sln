@@ -3,11 +3,15 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.30709.132
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GameSeverStudy", "GameSeverStudy\GameSeverStudy.vcxproj", "{5AACE47D-91D9-4416-A037-60C860D4FF53}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CachePipelinePerpemanceTest", "GameSeverStudy\GameSeverStudy.vcxproj", "{5AACE47D-91D9-4416-A037-60C860D4FF53}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EchoConsoleServer", "EchoConsoleServer\EchoConsoleServer.vcxproj", "{5A9E723B-C72B-4AF8-AA6C-3B5C2A71ADDC}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EchoConsoleClient", "EchoConsoleClient\EchoConsoleClient.vcxproj", "{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChessSimpleMovement", "ChessSimpleMovement\ChessSimpleMovement.vcxproj", "{8A3E9009-5D26-4676-B080-2F342DF796FD}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChessSimpleMovementClient", "ChessSimpleMovementClient\ChessSimpleMovementClient.vcxproj", "{428FF60F-19EF-48E3-81FB-0BB599837C37}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -41,6 +45,22 @@ Global
 		{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}.Release|x64.Build.0 = Release|x64
 		{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}.Release|x86.ActiveCfg = Release|Win32
 		{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}.Release|x86.Build.0 = Release|Win32
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Debug|x64.ActiveCfg = Debug|x64
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Debug|x64.Build.0 = Debug|x64
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Debug|x86.ActiveCfg = Debug|Win32
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Debug|x86.Build.0 = Debug|Win32
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Release|x64.ActiveCfg = Release|x64
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Release|x64.Build.0 = Release|x64
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Release|x86.ActiveCfg = Release|Win32
+		{8A3E9009-5D26-4676-B080-2F342DF796FD}.Release|x86.Build.0 = Release|Win32
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Debug|x64.ActiveCfg = Debug|x64
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Debug|x64.Build.0 = Debug|x64
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Debug|x86.ActiveCfg = Debug|Win32
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Debug|x86.Build.0 = Debug|Win32
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x64.ActiveCfg = Release|x64
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x64.Build.0 = Release|x64
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x86.ActiveCfg = Release|Win32
+		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

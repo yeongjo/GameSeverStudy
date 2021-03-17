@@ -6,7 +6,17 @@ constexpr int SERVER_PORT = 3500;
 const char* SERVER_IP = "127.0.0.1"; // 자기 자신의 주소는 항상 127.0.0.1
 constexpr int BUF_SIZE = 1024;
 
+void display_error(const char* msg, int err_no)
+{
+    WCHAR* lpMsgBuf;
+    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
+    cout << msg;
+    wcout << lpMsgBuf << endl;
+    LocalFree(lpMsgBuf);
+}
+
 int main() {
+    wcout.imbue(locale("korean"));
     WSADATA WSAData;
     WSAStartup(MAKEWORD(2, 0), &WSAData);
     SOCKET server = WSASocket(AF_INET, SOCK_STREAM, 0, 0, 0, 0);
@@ -37,7 +47,12 @@ int main() {
         r_wsabuf[0].len = BUF_SIZE;
         DWORD bytes_recv;
         DWORD recv_flag = 0;
-        WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
+        int ret = WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
+    	if(SOCKET_ERROR == ret)
+    	{
+            display_error("recv_error: ", WSAGetLastError());
+            exit(-1);
+    	}
 
         cout << "Server sent:" << r_mess << endl;
     }
