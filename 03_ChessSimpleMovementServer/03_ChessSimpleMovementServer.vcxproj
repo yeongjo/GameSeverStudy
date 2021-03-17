@@ -21,10 +21,9 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{5a9e723b-c72b-4af8-aa6c-3b5c2a71addc}</ProjectGuid>
-    <RootNamespace>EchoConsoleServer</RootNamespace>
+    <ProjectGuid>{af71e240-55ca-430e-b2f1-d5d130f9fda7}</ProjectGuid>
+    <RootNamespace>My03ChessSimpleMovementServer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>02_EchoConsoleServer</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -140,7 +139,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="EchoConsoleServer.cpp" />
+    <ClCompile Include="03_ChessSimpleMovementServer.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

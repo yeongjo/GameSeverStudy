@@ -27,6 +27,7 @@
     <ProjectGuid>{428FF60F-19EF-48E3-81FB-0BB599837C37}</ProjectGuid>
     <RootNamespace>ChessSimpleMovement</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>03_ChessSimpleMovementClient</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

@@ -1,13 +1,13 @@
-Ôªø#include <iostream>
+#include <iostream>
 #include <conio.h>
 #include <WS2tcpip.h>
 #pragma comment(lib, "WS2_32.lib")
 using namespace std;
 
 constexpr int SERVER_PORT = 3500;
-const char* SERVER_IP = "127.0.0.1"; // ÏûêÍ∏∞ ÏûêÏã†Ïùò Ï£ºÏÜåÎäî Ìï≠ÏÉÅ 127.0.0.1
-constexpr int RECV_BUF_SIZE = 2;
-constexpr int SEND_BUF_SIZE = 1;
+const char* SERVER_IP = "127.0.0.1"; // ¿⁄±‚ ¿⁄Ω≈¿« ¡÷º“¥¬ «◊ªÛ 127.0.0.1
+constexpr int RECV_BUF_SIZE = 1;
+constexpr int SEND_BUF_SIZE = 2;
 constexpr int CONSOLE_START_Y = 1;
 #define MAPSIZE 8
 
@@ -23,13 +23,11 @@ void display_error(const char* msg, int err_no) {
 	LocalFree(lpMsgBuf);
 }
 
-int clamp(int value, int min, int max)
-{
+int clamp(int value, int min, int max) {
 	return value < min ? min : value > max ? max : value;
 }
 
-void gotoxy(int x, int y)
-{
+void gotoxy(int x, int y) {
 	COORD Pos;
 	Pos.X = x;
 	Pos.Y = y;
@@ -59,12 +57,31 @@ void drawMap() {
 	}
 }
 
-int main()
-{
+bool getKeyInput(char keyCode) {
+	switch (keyCode)
+	{
+	case 72: // ¿ß
+		playerPosY--;
+		break;
+	case 80: // æ∆∑°
+		playerPosY++;
+		break;
+	case 75: // øﬁ
+		playerPosX--;
+		break;
+	case 77: // ø¿∏•
+		playerPosX++;
+		break;
+	default:
+		return false;
+	}
+	playerPosX = clamp(playerPosX, 0, MAPSIZE - 1);
+	playerPosY = clamp(playerPosY, 0, MAPSIZE - 1);
+	return true;
+}
+
+int main() {
 	wcout.imbue(locale("korean"));
-	char serverIp[64];
-	cout << "ÏÑúÎ≤Ñ Ï£ºÏÜåÎ•º ÏûÖÎ†•Ìï¥Ï£ºÏÑ∏Ïöî: ";
-	cin >> serverIp;
 	WSADATA WSAData;
 	WSAStartup(MAKEWORD(2, 0), &WSAData);
 	SOCKET server = WSASocket(AF_INET, SOCK_STREAM, 0, 0, 0, 0);
@@ -72,36 +89,44 @@ int main()
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(SERVER_PORT);
-	inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
-	WSAConnect(server, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr), 0, 0, 0, 0);
+	server_addr.sin_addr.S_un.S_addr = INADDR_ANY;
 	
-	while(true)
+	bind(server, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+	
+	listen(server, SOMAXCONN);
+	
+	SOCKADDR_IN cl_addr;
+	int addr_size = sizeof(cl_addr);
+	SOCKET client = WSAAccept(server, reinterpret_cast<sockaddr*>(&cl_addr), &addr_size, NULL, NULL);
+
+	while (true)
 	{
 		drawMap();
-
-		// send
-		char mess[SEND_BUF_SIZE];
-		mess[0] = static_cast<char>(_getch());
-		WSABUF s_wsabuf[1]; // Î≥¥ÎÇº Î≤ÑÌçº
-		s_wsabuf[0].buf = mess;
-		s_wsabuf[0].len = SEND_BUF_SIZE;
-		DWORD bytes_sent;
-		WSASend(server, s_wsabuf, 1, &bytes_sent, 0, NULL, NULL);
-
+		
 		// recv
 		char r_mess[RECV_BUF_SIZE];
-		WSABUF r_wsabuf[1]; // Î≥¥ÎÇº Î≤ÑÌçº
+		WSABUF r_wsabuf[1]; // ∫∏≥æ πˆ∆€
 		r_wsabuf[0].buf = r_mess;
 		r_wsabuf[0].len = RECV_BUF_SIZE;
 		DWORD bytes_recv;
 		DWORD recv_flag = 0;
-		int ret = WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
+		int ret = WSARecv(client, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
 		if (SOCKET_ERROR == ret)
 		{
 			display_error("recv_error: ", WSAGetLastError());
 			exit(-1);
 		}
-		playerPosX = r_mess[0];
-		playerPosY = r_mess[1];
+
+		getKeyInput(r_mess[0]);
+
+		// send
+		char mess[SEND_BUF_SIZE];
+		mess[0] = playerPosX;
+		mess[1] = playerPosY;
+		WSABUF s_wsabuf[1]; // ∫∏≥æ πˆ∆€
+		s_wsabuf[0].buf = mess;
+		s_wsabuf[0].len = SEND_BUF_SIZE;
+		DWORD bytes_sent;
+		WSASend(client, s_wsabuf, 1, &bytes_sent, 0, NULL, NULL);
 	}
 }

@@ -24,6 +24,7 @@
     <ProjectGuid>{8a3e9009-5d26-4676-b080-2f342df796fd}</ProjectGuid>
     <RootNamespace>ChessSimpleMovement</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>01_ChessSimpleMovement</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
