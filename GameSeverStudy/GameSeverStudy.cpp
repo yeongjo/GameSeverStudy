@@ -12,7 +12,7 @@ int main()
 	//long long sum = 0;
 	//for (int i = 1; i < 10'000'000; ++i)
 	//{
-	//	//this_thread::yield(); // 아무것도 안하는 운영체제 호출
+	//	//this_thread::yield(); // 아무것도 안하는 운영체제 시스템 콜 호출
 	//	sum += i;
 	//}
 	//cout << "Sum = " << sum << endl;

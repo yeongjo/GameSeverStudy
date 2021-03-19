@@ -1,5 +1,5 @@
 #pragma once
 class Profiler {
-	static int start
+	static int start;
 };
 
