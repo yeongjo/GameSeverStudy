@@ -24,7 +24,7 @@
     <ProjectGuid>{5aace47d-91d9-4416-a037-60c860d4ff53}</ProjectGuid>
     <RootNamespace>GameSeverStudy</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>CachePipelinePerpemanceTest</ProjectName>
+    <ProjectName>00_CachePipelinePerpemanceTest</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

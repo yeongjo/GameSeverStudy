@@ -3,15 +3,17 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.30709.132
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CachePipelinePerpemanceTest", "GameSeverStudy\GameSeverStudy.vcxproj", "{5AACE47D-91D9-4416-A037-60C860D4FF53}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "00_CachePipelinePerpemanceTest", "GameSeverStudy\GameSeverStudy.vcxproj", "{5AACE47D-91D9-4416-A037-60C860D4FF53}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EchoConsoleServer", "EchoConsoleServer\EchoConsoleServer.vcxproj", "{5A9E723B-C72B-4AF8-AA6C-3B5C2A71ADDC}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "02_EchoConsoleServer", "EchoConsoleServer\EchoConsoleServer.vcxproj", "{5A9E723B-C72B-4AF8-AA6C-3B5C2A71ADDC}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EchoConsoleClient", "EchoConsoleClient\EchoConsoleClient.vcxproj", "{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "02_EchoConsoleClient", "EchoConsoleClient\EchoConsoleClient.vcxproj", "{9BA45BF9-44C2-4600-B7CB-24BCBCB2A0D7}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChessSimpleMovement", "ChessSimpleMovement\ChessSimpleMovement.vcxproj", "{8A3E9009-5D26-4676-B080-2F342DF796FD}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "01_ChessSimpleMovement", "ChessSimpleMovement\ChessSimpleMovement.vcxproj", "{8A3E9009-5D26-4676-B080-2F342DF796FD}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChessSimpleMovementClient", "ChessSimpleMovementClient\ChessSimpleMovementClient.vcxproj", "{428FF60F-19EF-48E3-81FB-0BB599837C37}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "03_ChessSimpleMovementClient", "ChessSimpleMovementClient\ChessSimpleMovementClient.vcxproj", "{428FF60F-19EF-48E3-81FB-0BB599837C37}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "03_ChessSimpleMovementServer", "03_ChessSimpleMovementServer\03_ChessSimpleMovementServer.vcxproj", "{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -61,6 +63,14 @@ Global
 		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x64.Build.0 = Release|x64
 		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x86.ActiveCfg = Release|Win32
 		{428FF60F-19EF-48E3-81FB-0BB599837C37}.Release|x86.Build.0 = Release|Win32
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Debug|x64.ActiveCfg = Debug|x64
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Debug|x64.Build.0 = Debug|x64
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Debug|x86.ActiveCfg = Debug|Win32
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Debug|x86.Build.0 = Debug|Win32
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x64.ActiveCfg = Release|x64
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x64.Build.0 = Release|x64
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x86.ActiveCfg = Release|Win32
+		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
