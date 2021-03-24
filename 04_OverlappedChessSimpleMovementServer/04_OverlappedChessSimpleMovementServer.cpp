@@ -66,7 +66,7 @@ void gotoxy(int x, int y) {
 	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), Pos);
 }
 
-bool getKeyInput(PlayerInfo& playerInfo, char keyCode) {
+bool getKeyInput(PlayerInfo& playerInfo, unsigned char keyCode) {
 	switch (keyCode)
 	{
 	case 72: // 위
@@ -93,27 +93,28 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
 
 void sendEveryPlayersInfo(SOCKETINFO* socketInfo) {
-	auto lter0 = clients.begin();
-	auto lter1 = clients.begin();
 	const auto clientCnt = clients.size();
 	if(clientCnt == 0){
 		return;
 	}
 
+	auto lter1 = clients.begin();
 	while (lter1 != clients.end()) {
 		int i = 0;
-		clientsFromSend1[&lter1->second.sendOverlapped[1]] = &lter1->second;
+		auto& info = clients[lter1->first];
+		clientsFromSend1[&info.sendOverlapped[1]] = &info;
+		auto lter0 = clients.begin();
 		while (lter0 != clients.end()) {
-			reinterpret_cast<SendPacket*>(lter1->second.sendMessageBuffer)->playerInfos[i] = lter0->second.player;
+			reinterpret_cast<SendPacket*>(info.sendMessageBuffer)->playerInfos[i] = lter0->second.player;
 			++lter0;
 			++i;
 		}
-		reinterpret_cast<SendPacket*>(lter1->second.sendMessageBuffer)->playerCnt = clientCnt;
+		reinterpret_cast<SendPacket*>(info.sendMessageBuffer)->playerCnt = (unsigned char)clientCnt;
 
-		lter1->second.sendDataBuffer.buf = lter1->second.sendMessageBuffer;
-		lter1->second.sendDataBuffer.len = (SEND_BUF_SIZE * clientCnt) + sizeof SendPacket::playerCnt;
-		memset(&(lter1->second.sendOverlapped[1]), 0, sizeof(WSAOVERLAPPED)); // 재사용하기위해 0으로 초기화
-		WSASend(lter1->second.socket, &(lter1->second.sendDataBuffer), 1, NULL, 0, &lter1->second.sendOverlapped[1], sendPlayerInfosCallback);
+		info.sendDataBuffer.buf = info.sendMessageBuffer;
+		info.sendDataBuffer.len = (SEND_BUF_SIZE * clientCnt) + sizeof( SendPacket::playerCnt);
+		memset(&(info.sendOverlapped[1]), 0, sizeof(WSAOVERLAPPED)); // 재사용하기위해 0으로 초기화
+		WSASend(info.socket, &(info.sendDataBuffer), 1, NULL, 0, &info.sendOverlapped[1], sendPlayerInfosCallback);
 		++lter1;
 	}
 }
@@ -129,7 +130,7 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 		clients.erase(socket);
 		return;
 	}  // 클라이언트가 closesocket을 했을 경우
-	cout << "From client : " << (int)client.sendMessageBuffer[0] << " (" << dataBytes << ") bytes)\n";
+	cout << "From client : " << (unsigned)client.sendMessageBuffer[0] << " (" << dataBytes << " bytes)\n";
 
 	getKeyInput(client.player, client.sendMessageBuffer[0]);
 	cout << "And move player : " << (unsigned)client.player.id << ": " << (unsigned)client.player.posX << ": " << (unsigned)client.player.posY << ": " << " (" << dataBytes << " bytes)\n";
@@ -159,7 +160,7 @@ void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAP
 	int result = WSARecv(client.socket, &client.recvDataBuffer, 1, 0, &flags, &client.recvOverlapped, recv_callback);
 	if (result == SOCKET_ERROR) {
 		cout << "ERROR!: " << client.player.id << endl;
-		display_error("Send error: ", WSAGetLastError());
+		display_error("Recv error: ", WSAGetLastError());
 	}
 }
 
