@@ -72,15 +72,15 @@ int main() {
 //   inet_pton(AF_INET, SERVER_IP, &serverAddr.sin_addr);
 //   connect(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
 //   while (true) {
-//      char messageBuffer[BUF_SIZE + 1];
+//      char sendMessageBuffer[BUF_SIZE + 1];
 //      cout << "Enter Message: ";
-//      cin.getline(messageBuffer, BUF_SIZE);
-//      int bufferLen = static_cast<int>(strlen(messageBuffer));
+//      cin.getline(sendMessageBuffer, BUF_SIZE);
+//      int bufferLen = static_cast<int>(strlen(sendMessageBuffer));
 //      if (bufferLen == 0) break;
-//      int sendBytes = send(serverSocket, messageBuffer, bufferLen + 1, 0);
-//      cout << "Sent : " << messageBuffer << "(" << sendBytes << " bytes)\n";
-//      int receiveBytes = recv(serverSocket, messageBuffer, BUF_SIZE, 0);
-//      cout << "Received : " << messageBuffer << " (" << receiveBytes << " bytes)\n";
+//      int sendBytes = send(serverSocket, sendMessageBuffer, bufferLen + 1, 0);
+//      cout << "Sent : " << sendMessageBuffer << "(" << sendBytes << " bytes)\n";
+//      int receiveBytes = recv(serverSocket, sendMessageBuffer, BUF_SIZE, 0);
+//      cout << "Received : " << sendMessageBuffer << " (" << receiveBytes << " bytes)\n";
 //   }
 //   closesocket(serverSocket);
 //   WSACleanup();

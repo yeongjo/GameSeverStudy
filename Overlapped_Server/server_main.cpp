@@ -18,7 +18,7 @@ struct SOCKETINFO
 map <SOCKET, SOCKETINFO> clients;
 
 void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
-void CALLBACK send_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
+void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
 
 void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags)
 {
@@ -34,10 +34,10 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 	clients[client_s].dataBuffer.len = dataBytes;
 	memset(&(clients[client_s].overlapped), 0, sizeof(WSAOVERLAPPED)); // 재사용하기위해 0으로 초기화
 	//clients[client_s].overlapped.hEvent = (HANDLE)client_s; // 안쓰기로함
-	WSASend(client_s, &(clients[client_s].dataBuffer), 1, NULL, 0, overlapped, send_callback);
+	WSASend(client_s, &(clients[client_s].dataBuffer), 1, NULL, 0, overlapped, sendPlayerInfosCallback);
 }
 
-void CALLBACK send_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags)
+void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags)
 {
 	DWORD flags = 0;
 

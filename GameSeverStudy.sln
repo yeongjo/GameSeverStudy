@@ -15,6 +15,14 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "03_ChessSimpleMovementClien
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "03_ChessSimpleMovementServer", "03_ChessSimpleMovementServer\03_ChessSimpleMovementServer.vcxproj", "{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "04_Overlapped_Server", "Overlapped_Server\Overlapped_Server.vcxproj", "{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "04_OverlappedClient", "OverlappedClient\OverlappedClient.vcxproj", "{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "04_OverlappedChessSimpleMovementClient", "04_OverlappedChessSimpleMovementClient\04_OverlappedChessSimpleMovementClient.vcxproj", "{91213994-1FA8-4D91-9E6E-B40535D96291}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "04_OverlappedChessSimpleMovementServer", "04_OverlappedChessSimpleMovementServer\04_OverlappedChessSimpleMovementServer.vcxproj", "{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -71,6 +79,38 @@ Global
 		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x64.Build.0 = Release|x64
 		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x86.ActiveCfg = Release|Win32
 		{AF71E240-55CA-430E-B2F1-D5D130F9FDA7}.Release|x86.Build.0 = Release|Win32
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Debug|x64.ActiveCfg = Debug|x64
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Debug|x64.Build.0 = Debug|x64
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Debug|x86.ActiveCfg = Debug|Win32
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Debug|x86.Build.0 = Debug|Win32
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Release|x64.ActiveCfg = Release|x64
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Release|x64.Build.0 = Release|x64
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Release|x86.ActiveCfg = Release|Win32
+		{7CD41B49-6B30-4400-A7D7-F90BF4594B5E}.Release|x86.Build.0 = Release|Win32
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Debug|x64.ActiveCfg = Debug|x64
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Debug|x64.Build.0 = Debug|x64
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Debug|x86.ActiveCfg = Debug|Win32
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Debug|x86.Build.0 = Debug|Win32
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Release|x64.ActiveCfg = Release|x64
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Release|x64.Build.0 = Release|x64
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Release|x86.ActiveCfg = Release|Win32
+		{8FF0CA2F-7708-4F8C-AB67-55BAB699484A}.Release|x86.Build.0 = Release|Win32
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Debug|x64.ActiveCfg = Debug|x64
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Debug|x64.Build.0 = Debug|x64
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Debug|x86.ActiveCfg = Debug|Win32
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Debug|x86.Build.0 = Debug|Win32
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Release|x64.ActiveCfg = Release|x64
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Release|x64.Build.0 = Release|x64
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Release|x86.ActiveCfg = Release|Win32
+		{91213994-1FA8-4D91-9E6E-B40535D96291}.Release|x86.Build.0 = Release|Win32
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Debug|x64.ActiveCfg = Debug|x64
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Debug|x64.Build.0 = Debug|x64
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Debug|x86.ActiveCfg = Debug|Win32
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Debug|x86.Build.0 = Debug|Win32
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Release|x64.ActiveCfg = Release|x64
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Release|x64.Build.0 = Release|x64
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Release|x86.ActiveCfg = Release|Win32
+		{8D347ED1-BB9B-47E0-BA89-08E3DC0FA69F}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
