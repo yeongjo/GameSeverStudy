@@ -4,6 +4,7 @@
 #include <mutex>
 #include <thread>
 #include <WS2tcpip.h>
+#include <fcntl.h>
 #pragma comment(lib, "WS2_32.lib")
 using namespace std;
 
@@ -11,9 +12,9 @@ using namespace std;
 
 class PlayerInfo {
 public:
-	unsigned char id;
-	unsigned char posX;
-	unsigned char posY;
+	int id = 0;
+	int posX = 0;
+	int posY = 0;
 };
 
 class RecvPacket {
@@ -30,15 +31,16 @@ constexpr int CONSOLE_START_Y = 1;
 #define MAPSIZE 8
 
 char chessBoard[MAPSIZE][MAPSIZE];
-unsigned char myId;
+int myId;
 SOCKET server;
 int logLine = 9;
 mutex value_mutex;
 std::map<unsigned char, PlayerInfo> playerInfos;
+u_long nonBlockingMode = 1;
 
 void display_error(const char* msg, int err_no) {
 	WCHAR* lpMsgBuf;
-	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
+	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), (LPTSTR)&lpMsgBuf, 0, NULL);
 	cout << msg;
 	wcout << lpMsgBuf << endl;
 	LocalFree(lpMsgBuf);
@@ -51,10 +53,10 @@ int clamp(int value, int min, int max)
 
 void gotoxy(int x, int y)
 {
-	//COORD Pos;
-	//Pos.X = x;
-	//Pos.Y = y;
-	//SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), Pos);
+	COORD Pos;
+	Pos.X = x;
+	Pos.Y = y;
+	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), Pos);
 
 }
 
@@ -83,6 +85,16 @@ void drawMap() {
 
 }
 
+void drawPlayers() {
+	// 플레이어들 위치 그림
+	auto lter = playerInfos.begin();
+	while (lter != playerInfos.end()) {
+		auto info = lter->second;
+		chessBoard[info.posY][info.posX] = myId == lter->first ? 'M' : 'A';
+		lter++;
+	}
+}
+
 void recvUpdatePlayers() {
 	// recv
 	RecvPacket recvPacket;
@@ -94,8 +106,10 @@ void recvUpdatePlayers() {
 	int ret = WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
 	if (SOCKET_ERROR == ret)
 	{
-		display_error("recv_error: ", WSAGetLastError());
-		exit(-1);
+		//display_error("recv_error: ", WSAGetLastError());
+		//exit(-1);
+		drawPlayers();
+		return;
 	}
 
 	PlayerInfo r_mess[10];
@@ -104,29 +118,28 @@ void recvUpdatePlayers() {
 	ret = WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
 	if (SOCKET_ERROR == ret)
 	{
-		display_error("recv_error: ", WSAGetLastError());
-		exit(-1);
+		//display_error("recv_error: ", WSAGetLastError());
+		//exit(-1);
+		drawPlayers();
+		return;
 	}
 	
 	value_mutex.lock();
-	gotoxy(0, logLine++);
-	cout << "받은 바이트 크기(" << bytes_recv << ") ";
+	//gotoxy(0, logLine++);
+	//cout << "받은 바이트 크기(" << bytes_recv << ") 플레이어수("<< (unsigned)recvPacket.playerCnt<<")\n";
 	value_mutex.unlock();
 
 	for (int i = 0; i < recvPacket.playerCnt; i++){
+		playerInfos[r_mess[i].id].id = r_mess[i].id;
 		playerInfos[r_mess[i].id].posX = r_mess[i].posX;
 		playerInfos[r_mess[i].id].posY = r_mess[i].posY;
-		cout << "받은 데이터 id(" << (unsigned)r_mess[i].id << ") posX("<< (unsigned)r_mess[i].posX << ") posY("<< (unsigned)r_mess[i].posY<<")\n";
+		//cout << "받은 데이터 id(" << (unsigned)r_mess[i].id << ") posX("<< (unsigned)r_mess[i].posX << ") posY("<< (unsigned)r_mess[i].posY<<")\n";
 	}
 
-	// 플레이어들 위치 그림
-	auto lter = playerInfos.begin();
-	while (lter != playerInfos.end()) {
-		auto info = lter->second;
-		chessBoard[info.posY][info.posX] = myId == lter->first ? 'M' : 'A';
-		lter++;
-	}
+	drawPlayers();
 }
+
+
 
 unsigned int recvUpdatePlayersLoop(void* arg) {
 	while(true){
@@ -135,24 +148,34 @@ unsigned int recvUpdatePlayersLoop(void* arg) {
 	return 0;
 }
 
+int key_value;
+
 void sendKeyInput() {
 	// send
-	char mess[SEND_BUF_SIZE];
-	int key_value;
+	if (!_kbhit()){
+		return;
+	}
 	key_value = _getch();  // 키를 하나 입력 받는다.
 	if (key_value == 0x00 || key_value == 0xE0) {
 		// 확장키의 경우 키를 하나더 입력 받는다.
 		key_value = _getch();
+		cout << key_value << endl;
 	}
+	char mess[SEND_BUF_SIZE];
 	mess[0] = static_cast<char>(key_value);
+	key_value = -1;
 	WSABUF s_wsabuf[1]; // 보낼 버퍼
 	s_wsabuf[0].buf = mess;
 	s_wsabuf[0].len = SEND_BUF_SIZE;
 	DWORD bytes_sent;
-	WSASend(server, s_wsabuf, 1, &bytes_sent, 0, NULL, NULL);
+	int ret = WSASend(server, s_wsabuf, 1, &bytes_sent, 0, NULL, NULL);
+	if (ret == SOCKET_ERROR) {
+		//display_error("Send error: ", WSAGetLastError());
+		return;
+	}
 	value_mutex.lock();
 	gotoxy(0, logLine++);
-	cout << "보낸 데이터 내용(" << (int)mess[0] << ") 바이트크기(" << bytes_sent <<")\n";
+	//cout << "보낸 데이터 내용(" << (int)mess[0] << ") 바이트크기(" << bytes_sent <<")\n";
 	value_mutex.unlock();
 }
 
@@ -175,6 +198,7 @@ int main()
 	inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 	WSAConnect(server, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr), 0, 0, 0, 0);
 
+	//auto flag = fcntl(sock_fd, F_GETFL, 0);
 
 	// recv my id
 	WSABUF r_wsabuf[1]; // 보낼 버퍼
@@ -185,7 +209,7 @@ int main()
 	int ret = WSARecv(server, r_wsabuf, 1, &bytes_recv, &recv_flag, NULL, NULL);
 	if (SOCKET_ERROR == ret)
 	{
-		display_error("recv_error: ", WSAGetLastError());
+		display_error("201	recv_error: ", WSAGetLastError());
 		exit(-1);
 	}
 	gotoxy(0, logLine++);
@@ -195,14 +219,17 @@ int main()
 	initChessBoard();
 	drawMap();
 
-	unsigned int threadId;
-	//thread sendKeyInputThread(sendKeyInput);
+	ioctlsocket(server, FIONBIO, &nonBlockingMode);
+	//unsigned int threadId;
+	//thread sendKeyInputThread(sendKeyInputLoop);
 	//_beginthreadex(NULL, 0, recvUpdatePlayersLoop, NULL, 0, &threadId);
 	while(true)
 	{
 		recvUpdatePlayers();
 		
 		drawMap();
+
+		Sleep(60);
 
 		sendKeyInput();
 		

@@ -13,9 +13,9 @@ using namespace std;
 
 class PlayerInfo {
 public:
-	unsigned char id;
-	unsigned char posX;
-	unsigned char posY;
+	int id =0 ;
+	int posX = 0;
+	int posY = 0;
 };
 
 class SendPacket {
@@ -36,8 +36,7 @@ struct SOCKETINFO {
 	WSABUF sendDataBuffer;
 	WSABUF recvDataBuffer;
 	SOCKET socket;
-	char sendMessageBuffer[MAX_BUFFER];
-	char recvMessageBuffer[MAX_BUFFER];
+	char messageBuffer[MAX_BUFFER];
 	PlayerInfo player;
 };
 
@@ -45,18 +44,18 @@ map<SOCKET, SOCKETINFO> clients;
 map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromRecv;
 map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromSend0;
 map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromSend1;
-unsigned char currentPlayerId = 0;
+int currentPlayerId = 0;
 
 void display_error(const char* msg, int err_no) {
 	WCHAR* lpMsgBuf;
-	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
+	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), (LPTSTR)&lpMsgBuf, 0, NULL);
 	cout << msg;
 	wcout << lpMsgBuf << endl;
 	LocalFree(lpMsgBuf);
 }
 
 int clamp(int value, int min, int max) {
-	return value < min ? min : value > max ? max : value;
+	return value < min ? min : (value > max ? max : value);
 }
 
 void gotoxy(int x, int y) {
@@ -66,7 +65,7 @@ void gotoxy(int x, int y) {
 	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), Pos);
 }
 
-bool getKeyInput(PlayerInfo& playerInfo, unsigned char keyCode) {
+bool getKeyInput(PlayerInfo& playerInfo, int keyCode) {
 	switch (keyCode)
 	{
 	case 72: // 위
@@ -93,8 +92,9 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
 
 void sendEveryPlayersInfo(SOCKETINFO* socketInfo) {
+
 	const auto clientCnt = clients.size();
-	if(clientCnt == 0){
+	if (clientCnt == 0) {
 		return;
 	}
 
@@ -105,14 +105,14 @@ void sendEveryPlayersInfo(SOCKETINFO* socketInfo) {
 		clientsFromSend1[&info.sendOverlapped[1]] = &info;
 		auto lter0 = clients.begin();
 		while (lter0 != clients.end()) {
-			reinterpret_cast<SendPacket*>(info.sendMessageBuffer)->playerInfos[i] = lter0->second.player;
+			reinterpret_cast<SendPacket*>(info.messageBuffer)->playerInfos[i] = lter0->second.player;
 			++lter0;
 			++i;
 		}
-		reinterpret_cast<SendPacket*>(info.sendMessageBuffer)->playerCnt = (unsigned char)clientCnt;
+		reinterpret_cast<SendPacket*>(info.messageBuffer)->playerCnt = (unsigned char)clientCnt;
 
-		info.sendDataBuffer.buf = info.sendMessageBuffer;
-		info.sendDataBuffer.len = (SEND_BUF_SIZE * clientCnt) + sizeof( SendPacket::playerCnt);
+		info.sendDataBuffer.buf = info.messageBuffer;
+		info.sendDataBuffer.len = (SEND_BUF_SIZE * clientCnt) + sizeof(SendPacket::playerCnt);
 		memset(&(info.sendOverlapped[1]), 0, sizeof(WSAOVERLAPPED)); // 재사용하기위해 0으로 초기화
 		WSASend(info.socket, &(info.sendDataBuffer), 1, NULL, 0, &info.sendOverlapped[1], sendPlayerInfosCallback);
 		++lter1;
@@ -130,17 +130,17 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 		clients.erase(socket);
 		return;
 	}  // 클라이언트가 closesocket을 했을 경우
-	cout << "From client : " << (unsigned)client.sendMessageBuffer[0] << " (" << dataBytes << " bytes)\n";
+	cout << "From client : " << (int)client.messageBuffer[0] << " (" << dataBytes << ") bytes)\n";
 
-	getKeyInput(client.player, client.sendMessageBuffer[0]);
-	cout << "And move player : " << (unsigned)client.player.id << ": " << (unsigned)client.player.posX << ": " << (unsigned)client.player.posY << ": " << " (" << dataBytes << " bytes)\n";
+	getKeyInput(client.player, (int)client.messageBuffer[0]);
 	sendEveryPlayersInfo(&client);
 }
 
 void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags) {
+	DWORD flags = 0;
 	auto& socket = clientsFromSend1[overlapped]->socket;
 	auto& client = clients[socket];
-	
+
 	if (dataBytes == 0) {
 		cout << "send: dataBytes == 0 Remove socket from list" << endl;
 		closesocket(client.socket);
@@ -150,17 +150,15 @@ void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAP
 
 	// WSASend(응답에 대한)의 콜백일 경우
 
-	cout << "sendPlayerInfosCallback 보낸바이트크기(" << dataBytes << ")\n";
-
-	DWORD flags = 0;
+	PlayerInfo* sendedInfo = (PlayerInfo*)client.sendDataBuffer.buf;
+	cout << "TRACE - Send message : " << (unsigned)sendedInfo->id << ": " << (unsigned)sendedInfo->posX << ": " << (unsigned)sendedInfo->posY << ": " << " (" << dataBytes << " bytes)\n";
 	clientsFromRecv[&client.recvOverlapped] = &client;
 	memset(&(client.recvOverlapped), 0, sizeof(WSAOVERLAPPED));
-	client.recvDataBuffer.buf = client.recvMessageBuffer;
+	client.recvDataBuffer.buf = client.messageBuffer;
 	client.recvDataBuffer.len = 1;
-	int result = WSARecv(client.socket, &client.recvDataBuffer, 1, 0, &flags, &client.recvOverlapped, recv_callback);
-	if (result == SOCKET_ERROR) {
-		cout << "ERROR!: " << client.player.id << endl;
-		display_error("Recv error: ", WSAGetLastError());
+	auto ret = WSARecv(client.socket, &client.recvDataBuffer, 1, 0, &flags, &client.recvOverlapped, recv_callback);
+	if (ret == SOCKET_ERROR) {
+		display_error("Send error: ", WSAGetLastError());
 	}
 }
 
@@ -178,7 +176,9 @@ void CALLBACK sendPlayerIdCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED
 
 	// WSASend(응답에 대한)의 콜백일 경우
 
-	cout << "TRACE - Send message : id(" << (unsigned)*client.sendDataBuffer.buf << "): " << " (" << dataBytes << " bytes)\n";
+	auto id = *(unsigned short*)client.sendDataBuffer.buf;
+	cout << "TRACE - Send message : " << id << ": " << " (" << dataBytes << " bytes)\n";
+
 	sendEveryPlayersInfo(&client);
 }
 
@@ -193,7 +193,7 @@ void drawMap() {
 	}
 
 	auto iter = clients.begin();
-	while(iter != clients.end()){
+	while (iter != clients.end()) {
 		chessBoard[iter->second.player.posX][iter->second.player.posY] = 'A';
 	}
 
@@ -208,7 +208,7 @@ void drawMap() {
 }
 
 int main() {
-	wcout.imbue(locale("korean"));
+	wcout.imbue(locale("english"));
 	WSADATA WSAData;
 	WSAStartup(MAKEWORD(2, 2), &WSAData);
 	SOCKET listenSocket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
