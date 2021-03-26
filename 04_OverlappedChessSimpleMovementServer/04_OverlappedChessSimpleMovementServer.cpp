@@ -33,7 +33,7 @@ public:
 constexpr int SEND_BUF_SIZE = sizeof(PlayerInfo);
 
 
-struct SOCKETINFO {
+struct SESSION {
 	WSAOVERLAPPED recvOverlapped; // 구조체 맨 앞에 있는 값의 주소가 구조체의 주소를 사용할때 사용된다.
 	WSAOVERLAPPED sendOverlapped[2]; // 0은 id보내는거에 사용 1은 플레이어 정보 보내는데 사용 나중에 풀링해서 사용하는걸 만들거나 해야할듯
 	WSABUF sendDataBuffer;
@@ -43,15 +43,15 @@ struct SOCKETINFO {
 	PlayerInfo player;
 };
 
-map<SOCKET, SOCKETINFO> clients;
-map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromRecv;
-map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromSend0;
-map<LPWSAOVERLAPPED, SOCKETINFO*> clientsFromSend1;
+map<SOCKET, SESSION> clients;
+map<LPWSAOVERLAPPED, SESSION*> clientsFromRecv;
+map<LPWSAOVERLAPPED, SESSION*> clientsFromSend0;
+map<LPWSAOVERLAPPED, SESSION*> clientsFromSend1;
 int currentPlayerId = 0;
 char chessBoard[MAPSIZE][MAPSIZE];
 
 void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
-void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
+void CALLBACK send_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags);
 
 void display_error(const char* msg, int err_no) {
 	WCHAR* lpMsgBuf;
@@ -94,7 +94,7 @@ bool getKeyInput(PlayerInfo& playerInfo, int keyCode) {
 	return true;
 }
 
-void sendEveryPlayersInfo(SOCKETINFO* socketInfo) {
+void sendEveryPlayersInfo(SESSION* socketInfo) {
 	const auto clientCnt = clients.size();
 	if (clientCnt == 0) {
 		return;
@@ -116,12 +116,12 @@ void sendEveryPlayersInfo(SOCKETINFO* socketInfo) {
 		info.sendDataBuffer.buf = info.messageBuffer;
 		info.sendDataBuffer.len = (SEND_BUF_SIZE * clientCnt) + sizeof(SendPacket::playerCnt);
 		memset(&(info.sendOverlapped[1]), 0, sizeof(WSAOVERLAPPED)); // 재사용하기위해 0으로 초기화
-		WSASend(info.socket, &(info.sendDataBuffer), 1, NULL, 0, &info.sendOverlapped[1], socketInfo == &info ? sendPlayerInfosCallback : 0);
+		WSASend(info.socket, &(info.sendDataBuffer), 1, NULL, 0, &info.sendOverlapped[1], socketInfo == &info ? send_callback : 0);
 		++lter1;
 	}
 }
 
-void recvPlayerKeyInput(SOCKETINFO& socketInfo) {
+void recvPlayerKeyInput(SESSION& socketInfo) {
 	DWORD flags = 0;
 	clientsFromRecv[&socketInfo.recvOverlapped] = &socketInfo;
 	memset(&(socketInfo.recvOverlapped), 0, sizeof(WSAOVERLAPPED));
@@ -149,7 +149,7 @@ void CALLBACK recv_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overla
 	sendEveryPlayersInfo(&client);
 }
 
-void CALLBACK sendPlayerInfosCallback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags) {
+void CALLBACK send_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags) {
 	auto& socket = clientsFromSend1[overlapped]->socket;
 	auto& client = clients[socket];
 
@@ -206,7 +206,7 @@ void drawMap() {
 	}
 }
 
-void sendPlayerId(SOCKETINFO& client) {
+void sendPlayerId(SESSION& client) {
 	client.sendDataBuffer.len = sizeof(client.player.id);
 	client.sendDataBuffer.buf = reinterpret_cast<char*>(&client.player.id);
 	memset(&client.sendOverlapped[0], 0, sizeof(WSAOVERLAPPED));
@@ -239,7 +239,7 @@ int main() {
 
 	while (true) {
 		SOCKET clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddr, &addrLen);
-		clients[clientSocket] = SOCKETINFO{};
+		clients[clientSocket] = SESSION{};
 		clients[clientSocket].socket = clientSocket;
 		clients[clientSocket].player.id = currentPlayerId++;
 		sendPlayerId(clients[clientSocket]);
