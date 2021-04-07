@@ -31,7 +31,7 @@ struct c2s_move
 public:
 	unsigned char size;
 	unsigned char type;
-	DIRECTION direction; // 0: North, 1: South, 2:
+	DIRECTION dr; // 0: North, 1: South, 2:
 };
 
 struct s2c_login_ok
