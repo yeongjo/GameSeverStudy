@@ -52,7 +52,15 @@ void send_packet(int p_id, void *p) {
 	memcpy(s_over->m_packetbuf, p, p_size);
 	s_over->m_wasBuffer[0].buf = reinterpret_cast<char*>(&s_over->m_packetbuf);
 	s_over->m_wasBuffer[0].len = p_size;
-	WSASend(players[p_id].m_socket, s_over->m_wasBuffer, 1, NULL, 0, &s_over->m_over, 0);
+	int ret = WSASend(players[p_id].m_socket, s_over->m_wasBuffer, 1, NULL, 0, &s_over->m_over, 0);
+	if(ret != 0)
+	{
+		int err_no = WSAGetLastError();
+		if(WSA_IO_PENDING != err_no)
+		{
+			display_error("WSASend: ", err_no);
+		}
+	}
 }
 
 void do_recv(int key) {
@@ -60,7 +68,13 @@ void do_recv(int key) {
 	players[key].m_recv_over.m_wasBuffer[0].len = MAX_BUFFER - players[key].m_prev_size;
 	DWORD r_flag = 0;
 	memset(&players[key].m_recv_over.m_over, 0, sizeof(players[key].m_recv_over.m_over));
-	WSARecv(players[key].m_socket, players[key].m_recv_over.m_wasBuffer, 1, NULL, &r_flag, &players[key].m_recv_over.m_over, NULL);
+	int ret = WSARecv(players[key].m_socket, players[key].m_recv_over.m_wasBuffer, 1, NULL, &r_flag, &players[key].m_recv_over.m_over, NULL);
+	if (ret != 0) {
+		int err_no = WSAGetLastError();
+		if (WSA_IO_PENDING != err_no) {
+			display_error("WSARecv: ", err_no);
+		}
+	}
 }
 
 
@@ -109,15 +123,16 @@ void do_move(int p_id, DIRECTION direction)
 		y > 0 ? y-- : y;
 		break;
 	case D_S:
-		y < WORLD_Y_SIZE ? y++ : y;
+		y < WORLD_Y_SIZE - 1 ? y++ : y;
 		break;
 	case D_E:
-		x < WORLD_X_SIZE ? x++ : x;
+		x < WORLD_X_SIZE - 1 ? x++ : x;
 		break;
 	case D_W:
 		x > 0 ? x-- : x;
 		break;
 	}
+	send_move_packet(p_id);
 }
 
 void processPacket(int p_id, unsigned char* p_buf)
@@ -151,7 +166,20 @@ void disconnect(int p_id) {
 	players.erase(p_id);
 }
 
+void send_add_player(int c_id, int p_id)
+{
+	s2c_add_player p;
+	p.id = p_id;
+	p.size = sizeof(p);
+	p.type = S2C_ADD_PLAYER;
+	p.x = players[p_id].x;
+	p.y = players[p_id].y;
+	p.race = 0;
+	send_packet(c_id, &p);
+}
+
 int main() {
+	wcout.imbue(locale("korean"));
 	WSADATA WSAData;
 	WSAStartup(MAKEWORD(2, 2), &WSAData);
 	HANDLE h_iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
@@ -237,6 +265,13 @@ int main() {
 					players[c_id].m_socket = c_socket;
 					players[c_id].m_prev_size = 0;
 					CreateIoCompletionPort(reinterpret_cast<HANDLE>(c_socket), h_iocp, c_id, 0);
+
+					for (auto &pl : players)
+					{
+						if ((c_id == pl.second.id)) continue;
+						send_add_player(c_id, pl.second.id);
+						send_add_player(pl.second.id, c_id);
+					}
 					do_recv(c_id);
 
 					memset(&accept_over.m_over, 0, sizeof(accept_over.m_over));
