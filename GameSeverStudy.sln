@@ -25,7 +25,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "04-1_OverlappedChessSimpleM
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "05_StIocpServer", "05_StIocpServer\05_StIocpServer.vcxproj", "{ADE89EE9-725E-4F49-BB90-874396D067E2}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "client_sample", "client_sample\client_sample.vcxproj", "{DCB4DC6C-AE50-42B1-A2C8-7B345E09975E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "05_client_sample", "client_sample\client_sample.vcxproj", "{DCB4DC6C-AE50-42B1-A2C8-7B345E09975E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "06_Thread_1", "06_Thread_1\06_Thread_1.vcxproj", "{8B9B8770-D0CB-4015-8A8F-483B275F7025}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "07_MultiThreadTest", "07_MultiThreadTest\07_MultiThreadTest.vcxproj", "{C781E552-733A-454D-85FF-34E7DCA88706}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -131,6 +135,22 @@ Global
 		{DCB4DC6C-AE50-42B1-A2C8-7B345E09975E}.Release|x64.Build.0 = Release|x64
 		{DCB4DC6C-AE50-42B1-A2C8-7B345E09975E}.Release|x86.ActiveCfg = Release|Win32
 		{DCB4DC6C-AE50-42B1-A2C8-7B345E09975E}.Release|x86.Build.0 = Release|Win32
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Debug|x64.ActiveCfg = Debug|x64
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Debug|x64.Build.0 = Debug|x64
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Debug|x86.ActiveCfg = Debug|Win32
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Debug|x86.Build.0 = Debug|Win32
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Release|x64.ActiveCfg = Release|x64
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Release|x64.Build.0 = Release|x64
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Release|x86.ActiveCfg = Release|Win32
+		{8B9B8770-D0CB-4015-8A8F-483B275F7025}.Release|x86.Build.0 = Release|Win32
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Debug|x64.ActiveCfg = Debug|x64
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Debug|x64.Build.0 = Debug|x64
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Debug|x86.ActiveCfg = Debug|Win32
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Debug|x86.Build.0 = Debug|Win32
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Release|x64.ActiveCfg = Release|x64
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Release|x64.Build.0 = Release|x64
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Release|x86.ActiveCfg = Release|Win32
+		{C781E552-733A-454D-85FF-34E7DCA88706}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
