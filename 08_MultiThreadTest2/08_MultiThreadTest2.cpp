@@ -10,8 +10,12 @@ mutex ss;
 
 void consumer() {
 	ss.lock();
-	while (flag == false);
-	ss.unlock();
+	while (flag == false)
+	{
+		ss.unlock();
+		ss.lock();
+
+	}
 	cout << "i received" << sync_data << endl;
 }
 
