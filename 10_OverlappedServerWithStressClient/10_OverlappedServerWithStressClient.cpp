@@ -1,4 +1,4 @@
-Ôªø#include <array>
+#include <array>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -16,13 +16,12 @@ struct EX_OVER {
 	WSABUF         m_wsabuf[1];
 	unsigned char   m_packetbuf[MAX_BUFFER];
 	OP_TYPE         m_op;
-	SOCKET m_csocket; // OP_ACCEPT ÏóêÏÑúÎßå ÏÇ¨Ïö©
+	SOCKET m_csocket; // OP_ACCEPT ø°º≠∏∏ ªÁøÎ
 };
 
-enum PL_STATE{PLST_FREE, PLST_CONNECTED, PLST_INGAME};
+enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
 struct SESSION {
-	mutex m_slock;
 	PL_STATE m_state;
 	SOCKET   m_socket;
 	int      id;
@@ -32,27 +31,30 @@ struct SESSION {
 	//Game Contents Data
 	char   m_name[200];
 	short   x, y;
+	int move_time;
 };
 
 
 constexpr int SERVER_ID = 0;
 
-array <SESSION, MAX_USER+1> players;
+array <SESSION, MAX_USER + 1> players;
+
+void disconnect(int p_id);
 
 void display_error(const char* msg, int err_no) {
-	WCHAR* lpMsgBuf;
-	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
-	cout << msg;
-	wcout << lpMsgBuf << endl;
-	LocalFree(lpMsgBuf);
+	//WCHAR* lpMsgBuf;
+	//FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
+	//cout << msg;
+	//wcout << lpMsgBuf << endl;
+	//LocalFree(lpMsgBuf);
 }
 
 void send_packet(int p_id, void* p) {
 	unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
 	unsigned char p_type = reinterpret_cast<unsigned char*>(p)[1];
-	cout << "To client [ " << +p_id << "] : " << "Packet [" << +p_type << "]\n";
+	//cout << "To client [ " << +p_id << "]  Packet [" << +p_type << "]\n";
 
-	EX_OVER* s_over = new EX_OVER; //Î°úÏª¨ Î≥ÄÏàòÎ°ú Ï†àÎïå ÌïòÏßÄÎßêÍ≤É sendÍ≥ÑÏÜç ÏÇ¨Ïö©Ìï†Í≤ÉÏù¥Îãà
+	EX_OVER* s_over = new EX_OVER; //∑Œƒ√ ∫Øºˆ∑Œ ¿˝∂ß «œ¡ˆ∏ª∞Õ send∞Ëº” ªÁøÎ«“∞Õ¿Ã¥œ
 	s_over->m_op = OP_SEND;
 	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
 	memcpy(s_over->m_packetbuf, p, p_size);
@@ -61,8 +63,10 @@ void send_packet(int p_id, void* p) {
 	auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, 0);
 	if (0 != ret) {
 		auto err_no = WSAGetLastError();
-		if (WSA_IO_PENDING != err_no)
-			display_error("Error in SendPacket: ", err_no);
+		if (WSA_IO_PENDING != err_no) {
+			display_error("WSASend : ", WSAGetLastError());
+			disconnect(p_id);
+		}
 	}
 }
 
@@ -95,12 +99,12 @@ void do_recv(int s_id) {
 	}
 }
 
-int get_new_player_id(SOCKET socketSocket_d) {
-	for (int i = SERVER_ID + 1; i < MAX_USER; ++i) {
-		lock_guard<mutex> lg{ players[i].m_slock };
-		if (PLST_FREE == players[i].m_state)
-		{
+int get_new_player_id(SOCKET p_socket) {
+	for (int i = SERVER_ID + 1; i <= MAX_USER; ++i) {
+		if (PLST_FREE == players[i].m_state) {
 			players[i].m_state = PLST_CONNECTED;
+			players[i].m_socket = p_socket;
+			players[i].m_name[0] = 0;
 			return i;
 		}
 
@@ -134,6 +138,7 @@ void send_move_packet(int c_id, int p_id) {
 	p.type = S2C_MOVE_PLAYER;
 	p.x = players[p_id].x;
 	p.y = players[p_id].y;
+	p.move_time = players[p_id].move_time;
 	send_packet(c_id, &p);
 }
 
@@ -149,31 +154,24 @@ void do_move(int p_id, DIRECTION dir) {
 	}
 
 	for (auto& pl : players) {
-		lock_guard<mutex>(pl.m_slock);
-		if(PLST_INGAME == pl.m_state)
-		{
+		if (PLST_INGAME == pl.m_state) {
 			send_move_packet(pl.id, p_id);
 		}
 	}
 }
 
-void proccess_packet(int p_id, unsigned char* p_buf) {
+void process_packet(int p_id, unsigned char* p_buf) {
 
 	switch (p_buf[1]) {
 	case C2S_LOGIN: {
 		c2s_login* packet = reinterpret_cast<c2s_login*>(p_buf);
-		lock_guard<mutex> gl2{ players[p_id].m_slock };
 		strcpy_s(players[p_id].m_name, packet->name);
-		send_login_ok_packet(p_id);
 		players[p_id].m_state = PLST_INGAME;
+		send_login_ok_packet(p_id);
 
-		for(auto& pl : players)
-		{
-			if(p_id != pl.id)
-			{
-				lock_guard<mutex> lg{ pl.m_slock };
-				if(PLST_INGAME == pl.m_state)
-				{
+		for (auto& pl : players) {
+			if (p_id != pl.id) {
+				if (PLST_INGAME == pl.m_state) {
 					send_add_player(pl.id, p_id);
 					send_add_player(p_id, pl.id);
 				}
@@ -184,6 +182,7 @@ void proccess_packet(int p_id, unsigned char* p_buf) {
 				  break;
 	case C2S_MOVE: {
 		c2s_move* packet = reinterpret_cast<c2s_move*>(p_buf);
+		players[p_id].move_time = packet->move_time;
 		do_move(p_id, packet->dr);
 	}
 
@@ -197,15 +196,14 @@ void proccess_packet(int p_id, unsigned char* p_buf) {
 
 
 void disconnect(int p_id) {
-	{
-		lock_guard<mutex> gl(players[p_id].m_slock);
-		closesocket(players[p_id].m_socket);
-		players[p_id].m_state = PLST_FREE;
+	//cout << "disconnect: " << p_id << endl;
+	if (players[p_id].m_state == PLST_FREE) {
+		return;
 	}
+	closesocket(players[p_id].m_socket);
+	players[p_id].m_state = PLST_FREE;
 	for (auto& pl : players) {
-		lock_guard<mutex> gl2{ pl.m_slock };
-		if(PLST_INGAME == pl.m_state)
-		{
+		if (PLST_INGAME == pl.m_state) {
 			send_remove_player(pl.id, p_id);
 		}
 	}
@@ -230,11 +228,10 @@ void worker(HANDLE h_iocp, SOCKET listenSocket) {
 				display_error("GQCS:", WSAGetLastError());
 				disconnect(key);
 			}
-
-			if (0 == num_bytes) {
-				disconnect(key);
-				continue;
-			}
+		}
+		if ((key != SERVER_ID) && (0 == num_bytes)) {
+			disconnect(key);
+			continue;
 		}
 
 
@@ -242,13 +239,13 @@ void worker(HANDLE h_iocp, SOCKET listenSocket) {
 
 		switch (ex_over->m_op) {
 		case OP_RECV: {
-			// Ìå®ÌÇ∑ Ï°∞Î¶Ω Î∞è Ï≤òÎ¶¨
+			// ∆–≈∂ ¡∂∏≥ π◊ √≥∏Æ
 			unsigned char* packet_ptr = ex_over->m_packetbuf;
 			int num_data = num_bytes + players[key].m_prev_size;
 			int packet_size = packet_ptr[0];
 
 			while (num_data >= packet_size) {
-				proccess_packet(key, packet_ptr);
+				process_packet(key, packet_ptr);
 				num_data -= packet_size;
 				packet_ptr += packet_size;
 				if (0 >= num_data) break;
@@ -267,27 +264,24 @@ void worker(HANDLE h_iocp, SOCKET listenSocket) {
 		case OP_ACCEPT: {
 			int c_id = get_new_player_id(ex_over->m_csocket);
 			if (-1 != c_id) {
-				//players[c_id] = SESSION{};
-				players[c_id].id = c_id;
-				players[c_id].m_name[0] = 0;
+				//players[c_id].id = c_id;
+				//players[c_id].m_name[0] = 0;
+				//players[c_id].m_socket = ex_over->m_csocket;
 				players[c_id].m_recv_over.m_op = OP_RECV;
-				players[c_id].m_socket = ex_over->m_csocket;
 				players[c_id].m_prev_size = 0;
 				CreateIoCompletionPort(reinterpret_cast<HANDLE>(players[c_id].m_socket), h_iocp, c_id, 0);
-				//Ï£ºÏúÑÏóê ÎàÑÍ∞Ä ÏûàÎäîÏßÄ ÏïåÎ†§Ï§òÏïºÌï®
-				for (auto& pl : players) {
-					if (c_id == pl.id) continue;
-					send_add_player(c_id, pl.id);
-					send_add_player(pl.id, c_id);
-				}
-
-
+				//¡÷¿ßø° ¥©∞° ¿÷¥¬¡ˆ æÀ∑¡¡‡æﬂ«‘
+				//for (auto& pl : players) {
+				//	if (c_id == pl.id) continue;
+				//	send_add_player(c_id, pl.id);
+				//	send_add_player(pl.id, c_id);
+				//}
 				do_recv(c_id);
 			} else {
 				closesocket(ex_over->m_csocket);
 			}
 
-			//ÎÇòÏ§ëÏóê ÌïòÎÇòÎ°ú Ìï®ÏàòÎßåÎìúÏÖà 2Î≤àÏì∞ÎãàÍπå
+			//≥™¡ﬂø° «œ≥™∑Œ «‘ºˆ∏∏µÂº¿ 2π¯æ≤¥œ±Ó
 			memset(&ex_over->m_over, 0, sizeof(ex_over->m_over));
 			auto c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 			ex_over->m_csocket = c_socket;
@@ -299,8 +293,7 @@ void worker(HANDLE h_iocp, SOCKET listenSocket) {
 }
 
 int main() {
-	for (int i = 0; i < players.size(); ++i)
-	{
+	for (int i = 0; i < players.size(); ++i) {
 		auto& pl = players[i];
 		pl.id = i;
 		pl.m_state = PLST_FREE;
@@ -329,14 +322,15 @@ int main() {
 	accept_over.m_csocket = c_socket;
 	AcceptEx(listenSocket, c_socket, accept_over.m_packetbuf, 0, 32, 32, NULL, &accept_over.m_over);
 
-	vector<thread> worker_threads;
-	for (int i = 0; i < 4; ++i) {
-		worker_threads.emplace_back(worker, h_iocp, listenSocket);
-	}
+	worker(h_iocp, listenSocket);
+	//vector<thread> worker_threads;
+	//for (int i = 0; i < 1; ++i) {
+	//	worker_threads.emplace_back(worker, h_iocp, listenSocket);
+	//}
 
-	for (auto& th : worker_threads) {
-		th.join();
-	}
+	//for (auto& th : worker_threads) {
+	//	th.join();
+	//}
 
 	closesocket(listenSocket);
 	WSACleanup();
