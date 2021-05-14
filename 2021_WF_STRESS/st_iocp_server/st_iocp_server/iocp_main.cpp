@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <array>
+#include <unordered_set>
 using namespace std;
 #include <WS2tcpip.h>
 #include <MSWSock.h>
@@ -12,9 +13,8 @@ using namespace std;
 
 #include "protocol.h"
 
-enum OP_TYPE  { OP_RECV, OP_SEND, OP_ACCEPT };
-struct EX_OVER
-{
+enum OP_TYPE { OP_RECV, OP_SEND, OP_ACCEPT };
+struct EX_OVER {
 	WSAOVERLAPPED	m_over;
 	WSABUF			m_wsabuf[1];
 	unsigned char	m_packetbuf[MAX_BUFFER];
@@ -24,8 +24,7 @@ struct EX_OVER
 
 enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
-struct SESSION
-{
+struct SESSION {
 	mutex  m_slock;
 	atomic<PL_STATE> m_state;
 	SOCKET m_socket;
@@ -37,14 +36,17 @@ struct SESSION
 	char m_name[200];
 	short	x, y;
 	int move_time;
+	unordered_set<int> m_view_list;
+	mutex m_vl;
+
 };
 
 constexpr int SERVER_ID = 0;
+int VIEW_RADIUS = 5;
 array <SESSION, MAX_USER + 1> players;
 void disconnect(int p_id);
 
-void display_error(const char* msg, int err_no)
-{
+void display_error(const char* msg, int err_no) {
 	WCHAR* lpMsgBuf;
 	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
 		NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
@@ -53,8 +55,7 @@ void display_error(const char* msg, int err_no)
 	//wcout << lpMsgBuf << endl;
 	LocalFree(lpMsgBuf);
 }
-void send_packet(int p_id, void *p)
-{
+void send_packet(int p_id, void* p) {
 	int p_size = reinterpret_cast<unsigned char*>(p)[0];
 	int p_type = reinterpret_cast<unsigned char*>(p)[1];
 	//cout << "To client [" << p_id << "] : ";
@@ -63,24 +64,23 @@ void send_packet(int p_id, void *p)
 	s_over->m_op = OP_SEND;
 	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
 	memcpy(s_over->m_packetbuf, p, p_size);
-	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR *>(s_over->m_packetbuf);
+	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
 	s_over->m_wsabuf[0].len = p_size;
-	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, 
+	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1,
 		NULL, 0, &s_over->m_over, 0);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
-		if (WSA_IO_PENDING != err_no){
+		if (WSA_IO_PENDING != err_no) {
 			display_error("WSASend : ", WSAGetLastError());
 			disconnect(p_id);
 		}
 	}
 }
 
-void do_recv(int key)
-{
+void do_recv(int key) {
 
 	players[key].m_recv_over.m_wsabuf[0].buf =
-		reinterpret_cast<char *>(players[key].m_recv_over.m_packetbuf)
+		reinterpret_cast<char*>(players[key].m_recv_over.m_packetbuf)
 		+ players[key].m_prev_size;
 	players[key].m_recv_over.m_wsabuf[0].len = MAX_BUFFER - players[key].m_prev_size;
 	memset(&players[key].m_recv_over.m_over, 0, sizeof(players[key].m_recv_over.m_over));
@@ -94,10 +94,9 @@ void do_recv(int key)
 	}
 }
 
-int get_new_player_id(SOCKET p_socket)
-{
+int get_new_player_id(SOCKET p_socket) {
 	for (int i = SERVER_ID + 1; i <= MAX_USER; ++i) {
-		lock_guard<mutex> lg { players[i].m_slock };
+		lock_guard<mutex> lg{ players[i].m_slock };
 		if (PLST_FREE == players[i].m_state) {
 			players[i].m_state = PLST_CONNECTED;
 			players[i].m_socket = p_socket;
@@ -108,8 +107,7 @@ int get_new_player_id(SOCKET p_socket)
 	return -1;
 }
 
-void send_login_ok_packet(int p_id)
-{
+void send_login_ok_packet(int p_id) {
 	s2c_login_ok p;
 	p.hp = 10;
 	p.id = p_id;
@@ -122,8 +120,7 @@ void send_login_ok_packet(int p_id)
 	send_packet(p_id, &p);
 }
 
-void send_move_packet(int c_id, int p_id)
-{
+void send_move_packet(int c_id, int p_id) {
 	s2c_move_player p;
 	p.id = p_id;
 	p.size = sizeof(p);
@@ -134,8 +131,7 @@ void send_move_packet(int c_id, int p_id)
 	send_packet(c_id, &p);
 }
 
-void send_add_player(int c_id, int p_id)
-{
+void send_add_player(int c_id, int p_id) {
 	s2c_add_player p;
 	p.id = p_id;
 	p.size = sizeof(p);
@@ -146,8 +142,7 @@ void send_add_player(int c_id, int p_id)
 	send_packet(c_id, &p);
 }
 
-void send_remove_player(int c_id, int p_id)
-{
+void send_remove_player(int c_id, int p_id) {
 	s2c_remove_player p;
 	p.id = p_id;
 	p.size = sizeof(p);
@@ -155,31 +150,92 @@ void send_remove_player(int c_id, int p_id)
 	send_packet(c_id, &p);
 }
 
-void do_move(int p_id, DIRECTION dir)
-{
-	auto &x = players[p_id].x;
-	auto &y = players[p_id].y;
+bool can_see(int id_a, int id_b) {
+	return VIEW_RADIUS >= abs(players[id_a].x - players[id_b].x) + abs(players[id_a].y - players[id_b].y);
+}
+
+void do_move(int p_id, DIRECTION dir) {
+	auto& x = players[p_id].x;
+	auto& y = players[p_id].y;
 	switch (dir) {
-	case D_N: if (y> 0) y--; break;
+	case D_N: if (y > 0) y--; break;
 	case D_S: if (y < (WORLD_Y_SIZE - 1)) y++; break;
 	case D_W: if (x > 0) x--; break;
 	case D_E: if (x < (WORLD_X_SIZE - 1)) x++; break;
 	}
-	for (auto& pl : players){
+	for (auto& pl : players) {
 		//lock_guard <mutex> lg (pl.m_slock);
 		if (PLST_INGAME == pl.m_state)
 			send_move_packet(pl.id, p_id);
 	}
+	unordered_set<int> old_vl;
+	players[p_id].m_vl.lock();
+	old_vl = players[p_id].m_view_list;
+	players[p_id].m_vl.unlock();
+	unordered_set<int> new_vl;
+	for (auto& pl : players) {
+		if (pl.id == p_id) continue;
+		if (pl.m_state == PLST_INGAME && can_see(p_id, pl.id)) {
+			new_vl.insert(pl.id);
+		}
+	}
+	send_move_packet(p_id, p_id);
+	for (auto pl : new_vl) {
+		if (0 == old_vl.count(pl)) {	//1. 새로 시야에 들어오는 플레이어
+			players[p_id].m_vl.lock();
+			players[p_id].m_view_list.insert(pl);
+			players[p_id].m_vl.unlock();
+			send_add_player(p_id, pl);
+
+			players[pl].m_vl.lock();
+			if (0 == players[pl].m_view_list.count(p_id)) {
+				players[pl].m_view_list.insert(p_id);
+				send_add_player(pl, p_id);
+			} else {
+				send_move_packet(pl, p_id);
+			}
+			players[pl].m_vl.unlock();
+		} else {						//2. 기존 시야에도 있고 새 시야에도 있는 경우
+			players[pl].m_vl.lock();
+			if (0 == players[pl].m_view_list.count(p_id)) {
+				players[pl].m_view_list.insert(p_id);
+				send_add_player(pl, p_id);
+			} else {
+				send_move_packet(pl, p_id);
+			}
+			players[pl].m_vl.unlock();
+		}
+	}
+	for (auto pl : old_vl) {
+		if (0 == new_vl.count((pl))) {
+			// 기존 시야에 있었는데 새 시야에 없는 경우
+			players[p_id].m_vl.lock();
+			players[p_id].m_view_list.erase(pl);
+			players[p_id].m_vl.unlock();
+			send_remove_player(p_id, pl);
+
+			players[pl].m_vl.lock();
+			if (0 != players[pl].m_view_list.count(p_id)) {
+				players[pl].m_view_list.erase(p_id);
+				send_remove_player(pl, p_id);
+			} else {
+
+			}
+			players[pl].m_vl.unlock();
+		}
+	}
 }
 
-void process_packet(int p_id, unsigned char* p_buf)
-{
+
+void process_packet(int p_id, unsigned char* p_buf) {
 	switch (p_buf[1]) {
 	case C2S_LOGIN: {
 		c2s_login* packet = reinterpret_cast<c2s_login*>(p_buf);
 		{
 			lock_guard <mutex> gl2{ players[p_id].m_slock };
 			strcpy_s(players[p_id].m_name, packet->name);
+			players[p_id].x = rand() % WORLD_X_SIZE;
+			players[p_id].y = rand() % WORLD_Y_SIZE;
 			players[p_id].m_state = PLST_INGAME;
 		}
 		send_login_ok_packet(p_id);
@@ -188,21 +244,30 @@ void process_packet(int p_id, unsigned char* p_buf)
 			if (p_id != pl.id) {
 				lock_guard <mutex> gl{ pl.m_slock };
 				if (PLST_INGAME == pl.m_state) {
-					send_add_player(pl.id, p_id);
-					send_add_player(p_id, pl.id);
+					if (can_see(p_id, pl.id)) {
+						players[p_id].m_vl.lock();
+						players[p_id].m_view_list.insert(pl.id);
+						players[p_id].m_vl.unlock();
+						send_add_player(pl.id, p_id);
+
+						players[pl.id].m_vl.lock();
+						players[pl.id].m_view_list.insert(p_id);
+						players[pl.id].m_vl.lock();
+						send_add_player(p_id, pl.id);
+					}
 				}
 			}
 		}
 
 
 	}
-		break;
+				  break;
 	case C2S_MOVE: {
 		c2s_move* packet = reinterpret_cast<c2s_move*>(p_buf);
 		players[p_id].move_time = packet->move_time;
 		do_move(p_id, packet->dr);
 	}
-		break;
+				 break;
 	default:
 		cout << "Unknown Packet Type from Client[" << p_id;
 		cout << "] Packet Type [" << p_buf[1] << "]";
@@ -210,8 +275,7 @@ void process_packet(int p_id, unsigned char* p_buf)
 	}
 }
 
-void disconnect(int p_id)
-{
+void disconnect(int p_id) {
 	{
 		lock_guard <mutex> gl{ players[p_id].m_slock };
 		if (players[p_id].m_state == PLST_FREE) {
@@ -228,8 +292,7 @@ void disconnect(int p_id)
 	}
 }
 
-void worker(HANDLE h_iocp, SOCKET l_socket)
-{
+void worker(HANDLE h_iocp, SOCKET l_socket) {
 	while (true) {
 		DWORD num_bytes;
 		ULONG_PTR ikey;
@@ -243,8 +306,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 			if (SERVER_ID == key) {
 				display_error("GQCS : ", WSAGetLastError());
 				exit(-1);
-			}
-			else {
+			} else {
 				display_error("GQCS : ", WSAGetLastError());
 				disconnect(key);
 			}
@@ -285,8 +347,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 				CreateIoCompletionPort(
 					reinterpret_cast<HANDLE>(players[c_id].m_socket), h_iocp, c_id, 0);
 				do_recv(c_id);
-			}
-			else {
+			} else {
 				closesocket(players[c_id].m_socket);
 			}
 
@@ -302,8 +363,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 
 }
 
-int main()
-{
+int main() {
 	for (int i = 0; i < MAX_USER + 1; ++i) {
 		auto& pl = players[i];
 		pl.id = i;
