@@ -252,7 +252,7 @@ void Worker_Thread()
 
 constexpr int DELAY_LIMIT = 100;
 constexpr int DELAY_LIMIT2 = 150;
-constexpr int ACCEPT_DELY = 50;
+constexpr int ACCEPT_DELY = 25;
 
 void Adjust_Number_Of_Client()
 {
@@ -345,7 +345,7 @@ void Test_Thread()
 
 		for (int i = 0; i < num_connections; ++i) {
 			if (false == g_clients[i].connected) continue;
-			if (g_clients[i].last_move_time + 0.05s > high_resolution_clock::now()) continue;
+			if (g_clients[i].last_move_time + 1.0s > high_resolution_clock::now()) continue;
 			g_clients[i].last_move_time = high_resolution_clock::now();
 			c2s_move my_packet;
 			my_packet.size = sizeof(my_packet);
@@ -378,7 +378,7 @@ void InitializeNetwork()
 
 	g_hiocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, NULL, 0);
 
-	for (int i = 0; i < 6; ++i)
+	for (int i = 0; i < 4; ++i)
 		worker_threads.push_back(new std::thread{ Worker_Thread });
 
 	test_thread = thread{ Test_Thread };
