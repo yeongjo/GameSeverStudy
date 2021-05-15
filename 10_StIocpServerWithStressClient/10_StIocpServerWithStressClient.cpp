@@ -21,12 +21,93 @@ struct EX_OVER {
 
 enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
+constexpr int SENDEXOVER_INCREASEMENT_SIZE = 64;
+
+struct SendExOverManager {
+	struct ExOverUsableGroup {
+	private:
+		EX_OVER ex_over;
+		bool is_used = false;
+		SendExOverManager* manager;
+
+	public:
+		void setIsUsed(bool used) {
+			is_used = used;
+		}
+
+		bool getIsUsed() const {
+			return is_used;
+		}
+
+		EX_OVER& getExOver() {
+			return ex_over;
+		}
+
+		void recycle() {
+			manager->recycle(this);
+		}
+
+		void setManager(SendExOverManager* manager) { this->manager = manager; }
+	};
+
+private:
+	vector<ExOverUsableGroup> m_send_over;
+	vector<unsigned char> m_send_data;
+	mutex m_slock;
+
+public:
+	SendExOverManager() {
+		//auto size = m_send_over.size();
+		//m_send_over.resize(SENDEXOVER_INCREASEMENT_SIZE);
+		//for (size_t i = 0; i < size;++i) {
+		//	m_send_over[i].setManager(this);
+		//}
+		m_send_over.resize(1);
+	}
+
+	void addSendData(void* p) {
+		lock_guard<mutex> lg{ m_slock };
+		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
+
+		auto prev_size = m_send_data.size();
+		auto send_data_total_size = prev_size + p_size;
+		m_send_data.resize(send_data_total_size);
+		memcpy(static_cast<void*>(&m_send_data[prev_size]), p, p_size);
+	}
+
+	void clearSendData() {
+		lock_guard<mutex> lg{ m_slock };
+		m_send_data.clear();
+	}
+
+	void sendAddedData(int p_id);
+
+	EX_OVER& get() {
+		size_t size = m_send_over.size();
+		if (size == 0) {
+			m_send_over.resize(size + SENDEXOVER_INCREASEMENT_SIZE);
+			for (size_t i = size; i < size+SENDEXOVER_INCREASEMENT_SIZE; ++i) {
+				m_send_over[i].setManager(this);
+			}
+			size += SENDEXOVER_INCREASEMENT_SIZE;
+		}
+		auto& send_ex_over = m_send_over[size - 1];
+		m_send_over.pop_back();
+		return send_ex_over.getExOver();
+	}
+
+	void recycle(ExOverUsableGroup* usableGroup) {
+		usableGroup->setIsUsed(false);
+		m_send_over.push_back(*usableGroup);
+	}
+};
 struct SESSION {
 	PL_STATE m_state;
 	SOCKET   m_socket;
 	int      id;
 
 	EX_OVER m_recv_over;
+	
 	int m_prev_size;
 	//Game Contents Data
 	char   m_name[200];
@@ -34,7 +115,41 @@ struct SESSION {
 	int move_time;
 };
 
+struct SendExOverManager {
+	struct ExOverUsableGroup {
+	private:
+		EX_OVER ex_over;
+		bool is_used = false;
 
+	public:
+		void setIsUsed(bool used) {
+			is_used = used;
+		}
+
+		bool getIsUsed() const {
+			return is_used;
+		}
+
+		EX_OVER& getExOver() {
+			return ex_over;
+		}
+	};
+	
+	vector<ExOverUsableGroup> m_send_over;
+
+	EX_OVER& get() {
+		int size = m_send_over.size();
+		for (int i = 0; i < size; ++i){
+			if(!m_send_over[i].getIsUsed()){
+				return m_send_over[i].getExOver();
+			}
+		}
+		m_send_over.emplace_back();
+		return m_send_over[size].getExOver();
+	}
+};
+
+SendExOverManager sendExOverManager;
 constexpr int SERVER_ID = 0;
 
 array <SESSION, MAX_USER + 1> players;
@@ -54,7 +169,8 @@ void send_packet(int p_id, void* p) {
 	unsigned char p_type = reinterpret_cast<unsigned char*>(p)[1];
 	//cout << "To client [ " << +p_id << "]  Packet [" << +p_type << "]\n";
 
-	EX_OVER* s_over = new EX_OVER; //로컬 변수로 절때 하지말것 send계속 사용할것이니
+	EX_OVER* s_over = &sendExOverManager.get(); //로컬 변수로 절때 하지말것 send계속 사용할것이니
+	// TODO send callback에서 반환시켜줘야함
 	s_over->m_op = OP_SEND;
 	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
 	memcpy(s_over->m_packetbuf, p, p_size);
@@ -193,7 +309,33 @@ void process_packet(int p_id, unsigned char* p_buf) {
 	}
 }
 
-
+void SendExOverManager::sendAddedData(int p_id) {
+	m_slock.lock();
+	while (!m_send_data.empty()) {
+		auto send_data_begin = m_send_data.begin();
+		auto p_size = min(MAX_BUFFER, (int)m_send_data.size());
+		void* p = &*send_data_begin;
+		auto s_over = &get();
+		s_over->m_op = OP_SEND;
+		memset(&s_over->m_over, 0, sizeof(s_over->m_over));
+		memcpy(s_over->m_packetbuf, p, p_size);
+		s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
+		s_over->m_wsabuf[0].len = p_size;
+		auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, send_callback);
+		if (0 != ret) {
+			auto err_no = WSAGetLastError();
+			if (WSA_IO_PENDING != err_no) {
+				display_error("WSASend : ", WSAGetLastError());
+				m_slock.unlock();
+				disconnect(p_id);
+				m_slock.lock();
+			}
+		} else {
+			m_send_data.erase(send_data_begin, send_data_begin + p_size);
+		}
+	}
+	m_slock.unlock();
+}
 
 void disconnect(int p_id) {
 	//cout << "disconnect: " << p_id << endl;

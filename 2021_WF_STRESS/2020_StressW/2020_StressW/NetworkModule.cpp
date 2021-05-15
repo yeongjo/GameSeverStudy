@@ -13,17 +13,18 @@
 #include <queue>
 #include <array>
 #include <memory>
+#include <sstream>
 
 using namespace std;
 using namespace chrono;
 
 extern HWND		hWnd;
 
-const static int MAX_TEST = 1000;
+const static int MAX_TEST = 5000;
 const static int MAX_CLIENTS = MAX_TEST * 2;
 const static int INVALID_ID = -1;
-const static int MAX_PACKET_SIZE = 255;
-const static int MAX_BUFF_SIZE = 255;
+const static int MAX_PACKET_SIZE = 1024;
+const static int MAX_BUFF_SIZE = 1024;
 
 #pragma comment (lib, "ws2_32.lib")
 
@@ -165,8 +166,11 @@ void ProcessPacket(int ci, unsigned char packet[])
 		//SendPacket(my_id, &t_packet);
 	}
 	break;
-	default: MessageBox(hWnd, L"Unknown Packet Type", L"ERROR", 0);
-		while (true);
+	default:
+		//wstringstream errorMsg;
+		//errorMsg << L"Unknown Packet Type ";
+		//errorMsg << static_cast<unsigned>(packet[1]);
+		cout << "Unknown Packet Type " << +packet[1] << endl;
 	}
 }
 
@@ -378,7 +382,7 @@ void InitializeNetwork()
 
 	g_hiocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, NULL, 0);
 
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 3; ++i)
 		worker_threads.push_back(new std::thread{ Worker_Thread });
 
 	test_thread = thread{ Test_Thread };

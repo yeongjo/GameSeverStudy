@@ -193,8 +193,6 @@ void process_packet(int p_id, unsigned char* p_buf)
 				}
 			}
 		}
-
-
 	}
 		break;
 	case C2S_MOVE: {
@@ -205,7 +203,7 @@ void process_packet(int p_id, unsigned char* p_buf)
 		break;
 	default:
 		cout << "Unknown Packet Type from Client[" << p_id;
-		cout << "] Packet Type [" << p_buf[1] << "]";
+		cout << "] Packet Type [" << +p_buf[1] << "]";
 		while (true);
 	}
 }
