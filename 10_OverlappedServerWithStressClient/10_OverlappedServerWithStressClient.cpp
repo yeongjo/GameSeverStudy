@@ -12,6 +12,8 @@
 #pragma comment(lib, "MSWSock.lib")
 using namespace std;
 
+#define OPTIMIZE
+
 enum OP_TYPE { OP_RECV, OP_SEND, OP_ACCEPT };
 struct EX_OVER {
 	WSAOVERLAPPED   m_over;
@@ -23,7 +25,7 @@ struct EX_OVER {
 
 enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
-constexpr int SENDEXOVER_INCREASEMENT_SIZE = 64;
+constexpr size_t SENDEXOVER_INCREASEMENT_SIZE = 128;
 
 struct SendExOverManager {
 	struct ExOverUsableGroup {
@@ -33,6 +35,9 @@ struct SendExOverManager {
 		SendExOverManager* manager;
 
 	public:
+		ExOverUsableGroup(SendExOverManager* manager) : manager(manager) {
+			
+		}
 		void setIsUsed(bool used) {
 			is_used = used;
 		}
@@ -45,60 +50,73 @@ struct SendExOverManager {
 			return ex_over;
 		}
 
-		SendExOverManager* getManager() { return manager; }
-		void setManager(SendExOverManager* manager) { this->manager = manager; }
+		void recycle() {
+			manager->recycle(this);
+		}
 	};
 
 private:
-	vector<ExOverUsableGroup> m_send_over;
+	vector<ExOverUsableGroup*> m_send_over;
 	vector<unsigned char> m_send_data;
-	mutex m_slock;
+	mutex m_send_data_lock;
+	mutex m_send_over_vector_lock;
 
 public:
 	SendExOverManager() {
-		//auto size = m_send_over.size();
-		//m_send_over.resize(SENDEXOVER_INCREASEMENT_SIZE);
-		//for (size_t i = 0; i < size;++i) {
-		//	m_send_over[i].setManager(this);
-		//}
-		m_send_over.resize(1);
+		m_send_over.resize(SENDEXOVER_INCREASEMENT_SIZE);
+		auto size = m_send_over.size();
+		for (size_t i = 0; i < size;++i) {
+			m_send_over[i] = new ExOverUsableGroup(this);
+		}
 	}
 
 	void addSendData(void* p) {
-		lock_guard<mutex> lg{ m_slock };
+		lock_guard<mutex> lg{ m_send_data_lock };
 		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
 
 		auto prev_size = m_send_data.size();
-		auto send_data_total_size = prev_size + p_size;
+		auto send_data_total_size = prev_size + static_cast<size_t>(p_size);
 		m_send_data.resize(send_data_total_size);
+		//if (prev_size > 20) {
+		//	cout << "packet size: " << +p_size << "; prev_size: " << prev_size << "; send_data_total_size: " << send_data_total_size << endl;
+		//}
 		memcpy(static_cast<void*>(&m_send_data[prev_size]), p, p_size);
 	}
 
 	void clearSendData() {
-		lock_guard<mutex> lg{ m_slock };
+		lock_guard<mutex> lg{ m_send_data_lock };
 		m_send_data.clear();
+		for(int i =0; i < m_send_over.size(); ++i){
+			m_send_over[0]->setIsUsed(false);
+		}
 	}
 
 	void sendAddedData(int p_id);
 
 	EX_OVER& get() {
-		return m_send_over[0].getExOver();
-		//size_t size = m_send_over.size();
-		//if (size == 0) {
-		//	m_send_over.resize(size + SENDEXOVER_INCREASEMENT_SIZE);
-		//	for (size_t i = size; i < size+SENDEXOVER_INCREASEMENT_SIZE; ++i) {
-		//		m_send_over[i].setManager(this);
-		//	}
-		//	size += SENDEXOVER_INCREASEMENT_SIZE;
-		//}
-		//auto& send_ex_over = m_send_over[size - 1];
-		//m_send_over.pop_back();
-		//return send_ex_over.getExOver();
+		ExOverUsableGroup* send_ex_over;
+		{
+			lock_guard<mutex> lg{ m_send_over_vector_lock };
+			//return m_send_over[0].getExOver();
+			size_t size = m_send_over.size();
+			if (size == 0) {
+				m_send_over.resize(size + SENDEXOVER_INCREASEMENT_SIZE);
+				for (size_t i = size; i < size+SENDEXOVER_INCREASEMENT_SIZE; ++i) {
+					m_send_over[i] = new ExOverUsableGroup(this);
+				}
+				size += SENDEXOVER_INCREASEMENT_SIZE;
+			}
+			send_ex_over = m_send_over[size - 1];
+			m_send_over.pop_back();
+		}
+		send_ex_over->setIsUsed(true);
+		return send_ex_over->getExOver();
 	}
 
 	void recycle(ExOverUsableGroup *usableGroup) {
-		//usableGroup->setIsUsed(false);
-		//m_send_over.push_back(*usableGroup);
+		usableGroup->setIsUsed(false);
+		lock_guard<mutex> lg{ m_send_over_vector_lock };
+		m_send_over.push_back(usableGroup);
 	}
 };
 
@@ -144,7 +162,7 @@ void send_packet(int p_id, void* p) {
 	memcpy(s_over->m_packetbuf, p, p_size);
 	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
 	s_over->m_wsabuf[0].len = p_size;
-	auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, send_callback);
+	auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, NULL);
 	if (0 != ret) {
 		auto err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no) {
@@ -164,7 +182,11 @@ void send_login_ok_packet(int p_id) {
 	p.type = S2C_LOGIN_OK;
 	p.x = players[p_id].x;
 	p.y = players[p_id].y;
-	send_packet(p_id, &p);
+#ifdef OPTIMIZE
+	players[p_id].sendExOverManager.addSendData(&p);
+#else
+	send_packet(c_id, &p);
+#endif
 }
 
 void do_recv(int s_id) {
@@ -201,7 +223,11 @@ void send_add_player(int c_id, int p_id) {
 	p.x = players[p_id].x;
 	p.y = players[p_id].y;
 	p.race = 0;
+#ifdef OPTIMIZE
+		players[c_id].sendExOverManager.addSendData(&p);
+#else
 	send_packet(c_id, &p);
+#endif
 }
 
 void send_remove_player(int c_id, int p_id) {
@@ -209,7 +235,11 @@ void send_remove_player(int c_id, int p_id) {
 	p.id = p_id;
 	p.size = sizeof(p);
 	p.type = S2C_REMOVE_PLAYER;
+#ifdef OPTIMIZE
+	players[c_id].sendExOverManager.addSendData(&p);
+#else
 	send_packet(c_id, &p);
+#endif
 }
 
 void send_move_packet(int c_id, int p_id) {
@@ -220,8 +250,11 @@ void send_move_packet(int c_id, int p_id) {
 	p.x = players[p_id].x;
 	p.y = players[p_id].y;
 	p.move_time = players[p_id].move_time;
+#ifdef OPTIMIZE
 	players[c_id].sendExOverManager.addSendData(&p);
-	//send_packet(c_id, &p);
+#else
+	send_packet(c_id, &p);
+#endif
 }
 
 void do_move(int p_id, DIRECTION dir) {
@@ -272,10 +305,18 @@ void process_packet(int p_id, unsigned char* p_buf) {
 
 
 void SendExOverManager::sendAddedData(int p_id) {
-	m_slock.lock();
-	while (!m_send_data.empty()) {
-		auto send_data_begin = m_send_data.begin();
-		auto p_size = min(MAX_BUFFER, (int)m_send_data.size());
+	if (m_send_data.empty()){
+		return;
+	}
+	m_send_data_lock.lock();
+	vector<unsigned char> copyed_send_data;
+	copyed_send_data.resize(m_send_data.size());
+	std::copy(m_send_data.begin(), m_send_data.end(), copyed_send_data.begin());
+	m_send_data.clear();
+	m_send_data_lock.unlock();
+	while (!copyed_send_data.empty()) {
+		auto send_data_begin = copyed_send_data.begin();
+		auto p_size = min(MAX_BUFFER, (int)copyed_send_data.size());
 		void* p = &*send_data_begin;
 		auto s_over = &get();
 		s_over->m_op = OP_SEND;
@@ -283,20 +324,18 @@ void SendExOverManager::sendAddedData(int p_id) {
 		memcpy(s_over->m_packetbuf, p, p_size);
 		s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
 		s_over->m_wsabuf[0].len = p_size;
-		auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, NULL);
+		auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, send_callback);
 		if (0 != ret) {
 			auto err_no = WSAGetLastError();
 			if (WSA_IO_PENDING != err_no) {
 				display_error("WSASend : ", WSAGetLastError());
-				m_slock.unlock();
 				disconnect(p_id);
-				m_slock.lock();
+				return;
 			}
-		} else{
-			m_send_data.erase(send_data_begin, send_data_begin + p_size);
+		} else {
+			copyed_send_data.erase(send_data_begin, send_data_begin + p_size);
 		}
 	}
-	m_slock.unlock();
 }
 
 void disconnect(int p_id) {
@@ -341,8 +380,8 @@ void CALLBACK recv_callback(DWORD error, DWORD num_bytes, LPWSAOVERLAPPED overla
 
 void CALLBACK send_callback(DWORD Error, DWORD dataBytes, LPWSAOVERLAPPED overlapped, DWORD lnFlags) {
 
-	//auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(overlapped);
-	//usableGroup->getManager()->recycle(usableGroup);
+	auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(overlapped);
+	usableGroup->recycle();
 	//
 	//DWORD flags = 0;
 	//auto session = reinterpret_cast<SESSION*>(overlapped);
@@ -393,7 +432,9 @@ int main() {
 	int addrLen = sizeof(SOCKADDR_IN);
 	memset(&clientAddr, 0, addrLen);
 
+#ifdef OPTIMIZE
 	thread sendWorkerThread(sendWorker);
+#endif
 
 	while (true) {
 		DWORD num_bytes;
@@ -410,7 +451,6 @@ int main() {
 			closesocket(clientSocket);
 		}
 	}
-	sendWorkerThread.join();
 	closesocket(listenSocket);
 	WSACleanup();
 }

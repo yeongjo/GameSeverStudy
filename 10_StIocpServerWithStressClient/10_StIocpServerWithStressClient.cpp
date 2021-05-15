@@ -53,7 +53,7 @@ struct SendExOverManager {
 private:
 	vector<ExOverUsableGroup> m_send_over;
 	vector<unsigned char> m_send_data;
-	mutex m_slock;
+	mutex m_send_data_lock;
 
 public:
 	SendExOverManager() {
@@ -66,7 +66,7 @@ public:
 	}
 
 	void addSendData(void* p) {
-		lock_guard<mutex> lg{ m_slock };
+		lock_guard<mutex> lg{ m_send_data_lock };
 		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
 
 		auto prev_size = m_send_data.size();
@@ -76,7 +76,7 @@ public:
 	}
 
 	void clearSendData() {
-		lock_guard<mutex> lg{ m_slock };
+		lock_guard<mutex> lg{ m_send_data_lock };
 		m_send_data.clear();
 	}
 

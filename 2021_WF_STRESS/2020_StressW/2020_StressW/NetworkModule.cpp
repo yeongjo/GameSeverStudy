@@ -23,7 +23,7 @@ extern HWND		hWnd;
 const static int MAX_TEST = 5000;
 const static int MAX_CLIENTS = MAX_TEST * 2;
 const static int INVALID_ID = -1;
-const static int MAX_PACKET_SIZE = 1024;
+const static int MAX_PACKET_SIZE = 255;
 const static int MAX_BUFF_SIZE = 1024;
 
 #pragma comment (lib, "ws2_32.lib")
@@ -167,10 +167,11 @@ void ProcessPacket(int ci, unsigned char packet[])
 	}
 	break;
 	default:
-		//wstringstream errorMsg;
-		//errorMsg << L"Unknown Packet Type ";
-		//errorMsg << static_cast<unsigned>(packet[1]);
-		cout << "Unknown Packet Type " << +packet[1] << endl;
+		wstringstream errorMsg;
+		errorMsg << L"Unknown Packet Type ";
+		errorMsg << static_cast<unsigned>(packet[1]);
+		MessageBox(hWnd, errorMsg.str().c_str(), L"ERROR", 0);
+		//cout << "Unknown Packet Type " << +packet[1] << endl;
 	}
 }
 
