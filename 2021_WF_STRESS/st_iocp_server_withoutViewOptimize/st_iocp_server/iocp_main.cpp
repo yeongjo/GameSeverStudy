@@ -24,14 +24,110 @@ struct EX_OVER
 
 enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
+constexpr size_t SENDEXOVER_INCREASEMENT_SIZE = 128;
+
+struct SendExOverManager {
+	struct ExOverUsableGroup {
+	private:
+		EX_OVER ex_over;
+		bool is_used = false;
+		SendExOverManager* manager;
+
+	public:
+		ExOverUsableGroup(SendExOverManager* manager) : manager(manager) {
+
+		}
+		void setIsUsed(bool used) {
+			is_used = used;
+		}
+
+		bool getIsUsed() const {
+			return is_used;
+		}
+
+		EX_OVER& getExOver() {
+			return ex_over;
+		}
+
+		void recycle() {
+			manager->recycle(this);
+		}
+	};
+
+private:
+	vector<ExOverUsableGroup*> m_send_over;
+	vector<unsigned char> m_send_data;
+	mutex m_send_data_lock;
+	mutex m_send_over_vector_lock;
+
+public:
+	SendExOverManager() {
+		m_send_over.resize(SENDEXOVER_INCREASEMENT_SIZE);
+		auto size = m_send_over.size();
+		for (size_t i = 0; i < size; ++i) {
+			m_send_over[i] = new ExOverUsableGroup(this);
+		}
+	}
+
+	void addSendData(void* p) {
+		lock_guard<mutex> lg{ m_send_data_lock };
+		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
+
+		auto prev_size = m_send_data.size();
+		auto send_data_total_size = prev_size + static_cast<size_t>(p_size);
+		m_send_data.resize(send_data_total_size);
+		//if (prev_size > 20) {
+		//	cout << "packet size: " << +p_size << "; prev_size: " << prev_size << "; send_data_total_size: " << send_data_total_size << endl;
+		//}
+		memcpy(static_cast<void*>(&m_send_data[prev_size]), p, p_size);
+	}
+
+	void clearSendData() {
+		lock_guard<mutex> lg{ m_send_data_lock };
+		m_send_data.clear();
+		for (int i = 0; i < m_send_over.size(); ++i) {
+			m_send_over[0]->setIsUsed(false);
+		}
+	}
+
+	void sendAddedData(int p_id);
+
+	EX_OVER& get() {
+		ExOverUsableGroup* send_ex_over;
+		{
+			lock_guard<mutex> lg{ m_send_over_vector_lock };
+			//return m_send_over[0].getExOver();
+			size_t size = m_send_over.size();
+			if (size == 0) {
+				m_send_over.resize(size + SENDEXOVER_INCREASEMENT_SIZE);
+				for (size_t i = size; i < size + SENDEXOVER_INCREASEMENT_SIZE; ++i) {
+					m_send_over[i] = new ExOverUsableGroup(this);
+				}
+				size += SENDEXOVER_INCREASEMENT_SIZE;
+			}
+			send_ex_over = m_send_over[size - 1];
+			m_send_over.pop_back();
+		}
+		send_ex_over->setIsUsed(true);
+		return send_ex_over->getExOver();
+	}
+
+	void recycle(ExOverUsableGroup* usableGroup) {
+		usableGroup->setIsUsed(false);
+		lock_guard<mutex> lg{ m_send_over_vector_lock };
+		m_send_over.push_back(usableGroup);
+	}
+};
+
 struct SESSION
 {
+	EX_OVER m_recv_over;
+	SendExOverManager sendExOverManager;
 	mutex  m_slock;
 	atomic<PL_STATE> m_state;
 	SOCKET m_socket;
 	int		id;
 
-	EX_OVER m_recv_over;
 	int m_prev_size;
 
 	char m_name[200];
@@ -55,25 +151,26 @@ void display_error(const char* msg, int err_no)
 }
 void send_packet(int p_id, void *p)
 {
-	int p_size = reinterpret_cast<unsigned char*>(p)[0];
-	int p_type = reinterpret_cast<unsigned char*>(p)[1];
-	//cout << "To client [" << p_id << "] : ";
-	//cout << "Packet [" << p_type << "]\n";
-	EX_OVER* s_over = new EX_OVER;
-	s_over->m_op = OP_SEND;
-	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
-	memcpy(s_over->m_packetbuf, p, p_size);
-	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR *>(s_over->m_packetbuf);
-	s_over->m_wsabuf[0].len = p_size;
-	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, 
-		NULL, 0, &s_over->m_over, 0);
-	if (0 != ret) {
-		int err_no = WSAGetLastError();
-		if (WSA_IO_PENDING != err_no){
-			display_error("WSASend : ", WSAGetLastError());
-			disconnect(p_id);
-		}
-	}
+	players[p_id].sendExOverManager.addSendData(p);
+	//int p_size = reinterpret_cast<unsigned char*>(p)[0];
+	//int p_type = reinterpret_cast<unsigned char*>(p)[1];
+	////cout << "To client [" << p_id << "] : ";
+	////cout << "Packet [" << p_type << "]\n";
+	//EX_OVER* s_over = &players[p_id].sendExOverManager.get();
+	//s_over->m_op = OP_SEND;
+	//memset(&s_over->m_over, 0, sizeof(s_over->m_over));
+	//memcpy(s_over->m_packetbuf, p, p_size);
+	//s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR *>(s_over->m_packetbuf);
+	//s_over->m_wsabuf[0].len = p_size;
+	//int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, 
+	//	NULL, 0, &s_over->m_over, 0);
+	//if (0 != ret) {
+	//	int err_no = WSAGetLastError();
+	//	if (WSA_IO_PENDING != err_no){
+	//		display_error("WSASend : ", WSAGetLastError());
+	//		disconnect(p_id);
+	//	}
+	//}
 }
 
 void do_recv(int key)
@@ -217,6 +314,7 @@ void disconnect(int p_id)
 		}
 		closesocket(players[p_id].m_socket);
 		players[p_id].m_state = PLST_FREE;
+		players[p_id].sendExOverManager.clearSendData();
 	}
 
 	for (auto& pl : players) {
@@ -270,11 +368,12 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 			if (0 != num_data)
 				memcpy(ex_over->m_packetbuf, packet_ptr, num_data);
 			do_recv(key);
-		}
-					break;
-		case OP_SEND:
-			delete ex_over;
+		}break;
+		case OP_SEND: {
+			auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over);
+			players[key].sendExOverManager.recycle(usableGroup);
 			break;
+		}
 		case OP_ACCEPT: {
 			int c_id = get_new_player_id(ex_over->m_csocket);
 			if (-1 != c_id) {
@@ -298,6 +397,50 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 		}
 	}
 
+}
+
+void SendExOverManager::sendAddedData(int p_id) {
+	if (m_send_data.empty()) {
+		return;
+	}
+	m_send_data_lock.lock();
+	vector<unsigned char> copyed_send_data;
+	copyed_send_data.resize(m_send_data.size());
+	std::copy(m_send_data.begin(), m_send_data.end(), copyed_send_data.begin());
+	m_send_data.clear();
+	m_send_data_lock.unlock();
+	while (!copyed_send_data.empty()) {
+		auto send_data_begin = copyed_send_data.begin();
+		auto p_size = min(MAX_BUFFER, (int)copyed_send_data.size());
+		void* p = &*send_data_begin;
+		auto s_over = &get();
+		s_over->m_op = OP_SEND;
+		memset(&s_over->m_over, 0, sizeof(s_over->m_over));
+		memcpy(s_over->m_packetbuf, p, p_size);
+		s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
+		s_over->m_wsabuf[0].len = p_size;
+		auto ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, NULL);
+		if (0 != ret) {
+			auto err_no = WSAGetLastError();
+			if (WSA_IO_PENDING != err_no) {
+				display_error("WSASend : ", WSAGetLastError());
+				disconnect(p_id);
+				return;
+			}
+		} else {
+			copyed_send_data.erase(send_data_begin, send_data_begin + p_size);
+		}
+	}
+}
+
+void sendWorker() {
+	while (true) {
+		auto size = players.size();
+		for (size_t i = 0; i < size; ++i) {
+			players[i].sendExOverManager.sendAddedData(players[i].id);
+		}
+		Sleep(50);
+	}
 }
 
 int main()
@@ -337,8 +480,9 @@ int main()
 	}
 
 	vector <thread> worker_threads;
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 3; ++i)
 		worker_threads.emplace_back(worker, h_iocp, listenSocket);
+	worker_threads.emplace_back(sendWorker);
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);
