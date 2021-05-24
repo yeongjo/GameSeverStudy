@@ -19,7 +19,7 @@ using namespace std;
 #pragma comment (lib, "winmm.lib")
 #pragma comment (lib, "ws2_32.lib")
 
-#include "..\..\st_iocp_server\st_iocp_server\protocol.h"
+#include "..\..\mt_iocp_server_viewOptiSector\st_iocp_server\protocol.h"
 
 sf::TcpSocket socket;
 

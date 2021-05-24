@@ -5,7 +5,7 @@ constexpr int MAX_BUFFER = 1024;
 constexpr short SERVER_PORT = 3500;
 constexpr int WORLD_X_SIZE = 400;
 constexpr int WORLD_Y_SIZE = 400;
-constexpr int MAX_USER = 5000;
+constexpr int MAX_USER = 30000;
 
 constexpr unsigned char C2S_LOGIN = 1;
 constexpr unsigned char C2S_MOVE = 2;

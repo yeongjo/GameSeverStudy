@@ -141,36 +141,36 @@ void disconnect(int p_id);
 
 void display_error(const char* msg, int err_no)
 {
-	WCHAR* lpMsgBuf;
-	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-		NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		(LPTSTR)&lpMsgBuf, 0, NULL);
+	//WCHAR* lpMsgBuf;
+	//FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+	//	NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+	//	(LPTSTR)&lpMsgBuf, 0, NULL);
 	//cout << msg;
 	//wcout << lpMsgBuf << endl;
-	LocalFree(lpMsgBuf);
+	//LocalFree(lpMsgBuf);
 }
 void send_packet(int p_id, void *p)
 {
-	players[p_id].sendExOverManager.addSendData(p);
-	//int p_size = reinterpret_cast<unsigned char*>(p)[0];
-	//int p_type = reinterpret_cast<unsigned char*>(p)[1];
-	////cout << "To client [" << p_id << "] : ";
-	////cout << "Packet [" << p_type << "]\n";
-	//EX_OVER* s_over = &players[p_id].sendExOverManager.get();
-	//s_over->m_op = OP_SEND;
-	//memset(&s_over->m_over, 0, sizeof(s_over->m_over));
-	//memcpy(s_over->m_packetbuf, p, p_size);
-	//s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR *>(s_over->m_packetbuf);
-	//s_over->m_wsabuf[0].len = p_size;
-	//int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, 
-	//	NULL, 0, &s_over->m_over, 0);
-	//if (0 != ret) {
-	//	int err_no = WSAGetLastError();
-	//	if (WSA_IO_PENDING != err_no){
-	//		display_error("WSASend : ", WSAGetLastError());
-	//		disconnect(p_id);
-	//	}
-	//}
+	//players[p_id].sendExOverManager.addSendData(p);
+	int p_size = reinterpret_cast<unsigned char*>(p)[0];
+	int p_type = reinterpret_cast<unsigned char*>(p)[1];
+	//cout << "To client [" << p_id << "] : ";
+	//cout << "Packet [" << p_type << "]\n";
+	EX_OVER* s_over = &players[p_id].sendExOverManager.get();
+	s_over->m_op = OP_SEND;
+	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
+	memcpy(s_over->m_packetbuf, p, p_size);
+	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR *>(s_over->m_packetbuf);
+	s_over->m_wsabuf[0].len = p_size;
+	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1, 
+		NULL, 0, &s_over->m_over, 0);
+	if (0 != ret) {
+		int err_no = WSAGetLastError();
+		if (WSA_IO_PENDING != err_no){
+			display_error("WSASend : ", WSAGetLastError());
+			disconnect(p_id);
+		}
+	}
 }
 
 void do_recv(int key)
@@ -439,7 +439,6 @@ void sendWorker() {
 		for (size_t i = 0; i < size; ++i) {
 			players[i].sendExOverManager.sendAddedData(players[i].id);
 		}
-		Sleep(50);
 	}
 }
 
@@ -480,9 +479,9 @@ int main()
 	}
 
 	vector <thread> worker_threads;
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < 4; ++i)
 		worker_threads.emplace_back(worker, h_iocp, listenSocket);
-	worker_threads.emplace_back(sendWorker);
+	//worker_threads.emplace_back(sendWorker);
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);

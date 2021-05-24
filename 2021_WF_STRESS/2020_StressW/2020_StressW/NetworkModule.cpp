@@ -20,7 +20,9 @@ using namespace chrono;
 
 extern HWND		hWnd;
 
-const static int MAX_TEST = 5000;
+#include "..\..\mt_iocp_server_viewOptiSector\st_iocp_server\protocol.h"
+
+const static int MAX_TEST = MAX_USER;
 const static int MAX_CLIENTS = MAX_TEST * 2;
 const static int INVALID_ID = -1;
 const static int MAX_PACKET_SIZE = 255;
@@ -28,7 +30,6 @@ const static int MAX_BUFF_SIZE = 1024;
 
 #pragma comment (lib, "ws2_32.lib")
 
-#include "..\..\st_iocp_server\st_iocp_server\protocol.h"
 
 HANDLE g_hiocp;
 
@@ -257,7 +258,8 @@ void Worker_Thread()
 
 constexpr int DELAY_LIMIT = 100;
 constexpr int DELAY_LIMIT2 = 150;
-constexpr int ACCEPT_DELY = 25;
+constexpr int ACCEPT_DELY = 10;
+constexpr int DISCONNECT_DELY = (ACCEPT_DELY *10);
 
 void Adjust_Number_Of_Client()
 {
@@ -278,7 +280,7 @@ void Adjust_Number_Of_Client()
 			increasing = false;
 		}
 		if (100 > active_clients) return;
-		if (ACCEPT_DELY * 10 > duration_cast<milliseconds>(duration).count()) return;
+		if (DISCONNECT_DELY > duration_cast<milliseconds>(duration).count()) return;
 		last_connect_time = high_resolution_clock::now();
 		DisconnectClient(client_to_close);
 		client_to_close++;

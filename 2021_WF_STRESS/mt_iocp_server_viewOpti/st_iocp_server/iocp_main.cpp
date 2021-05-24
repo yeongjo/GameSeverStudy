@@ -190,20 +190,22 @@ void do_move(int p_id, DIRECTION dir) {
 			players[pl].m_vl.lock();
 			if (0 == players[pl].m_view_list.count(p_id)) {
 				players[pl].m_view_list.insert(p_id);
+				players[pl].m_vl.unlock();
 				send_add_player(pl, p_id);
 			} else {
+				players[pl].m_vl.unlock();
 				send_move_packet(pl, p_id);
 			}
-			players[pl].m_vl.unlock();
 		} else {						//2. 기존 시야에도 있고 새 시야에도 있는 경우
 			players[pl].m_vl.lock();
 			if (0 == players[pl].m_view_list.count(p_id)) {
 				players[pl].m_view_list.insert(p_id);
+				players[pl].m_vl.unlock();
 				send_add_player(pl, p_id);
 			} else {
+				players[pl].m_vl.unlock();
 				send_move_packet(pl, p_id);
 			}
-			players[pl].m_vl.unlock();
 		}
 	}
 	for (auto pl : old_vl) {
@@ -217,11 +219,12 @@ void do_move(int p_id, DIRECTION dir) {
 			players[pl].m_vl.lock();
 			if (0 != players[pl].m_view_list.count(p_id)) {
 				players[pl].m_view_list.erase(p_id);
+				players[pl].m_vl.unlock();
 				send_remove_player(pl, p_id);
 			} else {
+				players[pl].m_vl.unlock();
 
 			}
-			players[pl].m_vl.unlock();
 		}
 	}
 }
@@ -252,7 +255,7 @@ void process_packet(int p_id, unsigned char* p_buf) {
 
 						players[pl.id].m_vl.lock();
 						players[pl.id].m_view_list.insert(p_id);
-						players[pl.id].m_vl.lock();
+						players[pl.id].m_vl.unlock();
 						send_add_player(p_id, pl.id);
 					}
 				}
