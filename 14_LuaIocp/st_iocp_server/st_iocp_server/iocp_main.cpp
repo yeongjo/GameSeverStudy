@@ -20,7 +20,9 @@ extern "C" {
 
 #include "protocol.h"
 
-enum OP_TYPE  { OP_RECV, OP_SEND, OP_ACCEPT, OP_RANDO_MOVE, OP_ATTACK, OP_PLAYER_APPROACH };
+#define MESSAGE_MAX_BUFFER MAX_NAME
+
+enum OP_TYPE  { OP_RECV, OP_SEND, OP_ACCEPT, OP_RANDOM_MOVE, OP_RANDOM_MOVE_LOOP, OP_ATTACK, OP_PLAYER_APPROACH, OP_SEND_MESSAGE };
 struct EX_OVER
 {
 	WSAOVERLAPPED	m_over;
@@ -37,6 +39,8 @@ struct TIMER_EVENT {
 	OP_TYPE e_type;
 	chrono::system_clock::time_point start_time;
 	int target_id;
+	char buffer[MESSAGE_MAX_BUFFER];
+	bool hasBuffer;
 
 	constexpr bool operator < (const TIMER_EVENT& L) const
 	{
@@ -73,13 +77,20 @@ array <S_OBJECT, MAX_USER + 1> objects;
 
 HANDLE h_iocp;
 
-void add_event(int obj, OP_TYPE ev_t, int delay_ms)
+void add_event(int obj, OP_TYPE ev_t, int delay_ms, const char* buffer = nullptr, int target_id = -1)
 {
 	using namespace chrono;
 	TIMER_EVENT ev;
 	ev.e_type = ev_t;
 	ev.object = obj;
 	ev.start_time = system_clock::now() + milliseconds(delay_ms);
+	if(nullptr != buffer){
+		memcpy(ev.buffer, buffer, sizeof(char)*strlen(buffer));
+		ev.hasBuffer = true;
+	}else{
+		ev.hasBuffer = false;
+	}
+	ev.target_id = target_id;
 	timer_l.lock();
 	timer_queue.push(ev);
 	timer_l.unlock();
@@ -91,8 +102,12 @@ void wake_up_npc(int npc_id)
 		bool old_state = false;
 		if (true == atomic_compare_exchange_strong(&objects[npc_id].is_active,
 			&old_state, true))
-			add_event(npc_id, OP_RANDO_MOVE, 1000);
+			add_event(npc_id, OP_RANDOM_MOVE_LOOP, 1000);
 	}
+}
+
+void sleep_npc(int npc_id) {
+	
 }
 
 bool is_npc(int id)
@@ -515,28 +530,39 @@ void worker(HANDLE h_iocp, SOCKET l_socket)
 				ex_over->m_packetbuf, 0, 32, 32, NULL, &ex_over->m_over);
 		}
 			break;
-		case OP_RANDO_MOVE:
+		case OP_RANDOM_MOVE_LOOP: {
+			add_event(key, OP_RANDOM_MOVE_LOOP, 1000);
+		}
+		case OP_RANDOM_MOVE: {
 			do_npc_random_move(objects[key]);
-			add_event(key, OP_RANDO_MOVE, 1000);
 			delete ex_over;
 			break;
-		case OP_ATTACK:
+		}
+		case OP_ATTACK: {
 			delete ex_over;
 			break;
+		}
 		case OP_PLAYER_APPROACH: {
 			objects[key].m_sl.lock();
 			int move_player = *reinterpret_cast<int*>(ex_over->m_packetbuf);
 			lua_State* L = objects[key].L;
 			lua_getglobal(L, "player_is_near");
 			lua_pushnumber(L, move_player);
-			int res = lua_pcall(L, 1, 0, 0); // 영원히 고통받을뻔
+			int res = lua_pcall(L, 1, 0, 0);
 			if (0 != res) {
 				cout << "LUA error in exec: " << lua_tostring(L, -1) << endl;
 			}
 			objects[key].m_sl.unlock();
-
-		}
+			delete ex_over;
 			break;
+		}
+		case OP_SEND_MESSAGE: {
+			int c_id = *reinterpret_cast<int*>(ex_over->m_packetbuf);
+			char* mess = reinterpret_cast<char*>(ex_over->m_packetbuf + sizeof(int));
+			send_chat(c_id, key, mess);
+			delete ex_over;
+			break;
+		}
 		}
 	}
 }
@@ -573,8 +599,12 @@ void do_timer()
 			TIMER_EVENT ev = timer_queue.top();
 			timer_queue.pop();
 			timer_l.unlock();
-			EX_OVER* ex_over = new EX_OVER;
-			ex_over->m_op = OP_RANDO_MOVE;
+			auto* ex_over = new EX_OVER;
+			ex_over->m_op = ev.e_type;
+			memcpy(ex_over->m_packetbuf, &ev.target_id, sizeof(ev.target_id));
+			if(ev.hasBuffer){
+				memcpy(ex_over->m_packetbuf+sizeof(ev.target_id), ev.buffer, sizeof(ev.buffer));
+			}
 			PostQueuedCompletionStatus(h_iocp, 1, ev.object, &ex_over->m_over);
 		}
 		else {
@@ -616,6 +646,24 @@ int API_print(lua_State* L) {
 	return 0;
 }
 
+int API_add_event_npc_random_move(lua_State* L) {
+	int p_id = lua_tonumber(L, -2);
+	int delay = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	add_event(p_id, OP_RANDOM_MOVE, delay);
+	return 0;
+}
+
+int API_add_event_send_mess(lua_State* L) {
+	int p_id = lua_tonumber(L, -4);
+	int o_id = lua_tonumber(L, -3);
+	const char* mess = lua_tostring(L, -2);
+	int delay = lua_tonumber(L, -1);
+	lua_pop(L, 5);
+	add_event(p_id, OP_SEND_MESSAGE, delay, mess, o_id);
+	return 0;
+}
+
 int main()
 {
 	for (int i = 0; i < MAX_USER + 1; ++i) {
@@ -627,7 +675,7 @@ int main()
 			pl.m_state = PLST_INGAME;
 			pl.x = rand() % WORLD_X_SIZE;
 			pl.y = rand() % WORLD_Y_SIZE;
-			// add_event(i, OP_RANDO_MOVE, 1000);
+			// add_event(i, OP_RANDOM_MOVE, 1000);
 
 			lua_State* L = pl.L = luaL_newstate();
 			luaL_openlibs(L);
@@ -641,6 +689,8 @@ int main()
 			lua_register(L, "API_get_y", API_get_y);
 			lua_register(L, "API_send_mess", API_send_mess);
 			lua_register(L, "API_print", API_print);
+			lua_register(L, "API_add_event_npc_random_move", API_add_event_npc_random_move);
+			lua_register(L, "API_add_event_send_mess", API_add_event_send_mess);
 		}
 	}
 

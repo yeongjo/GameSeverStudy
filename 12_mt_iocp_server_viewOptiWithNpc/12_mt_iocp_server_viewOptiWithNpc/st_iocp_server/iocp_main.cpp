@@ -37,6 +37,7 @@ struct TIMER_EVENT {
 };
 
 priority_queue<TIMER_EVENT> timer_queue;
+unordered_set<int> timer_dequeue_objects;
 mutex timer_l;
 HANDLE h_iocp;
 
@@ -192,7 +193,17 @@ void wake_up_npc(int id) {
 	if(objects[id].is_active == false){
 		bool old_state = false;
 		if(true == atomic_compare_exchange_strong(&objects[id].is_active, &old_state, true)){
+			timer_dequeue_objects.erase(id);
 			add_event(id, OP_RANDOM_MOVE, 1000);
+		}
+	}
+}
+
+void sleep_npc(int id) {
+	if (objects[id].is_active == true) {
+		bool old_state = true;
+		if (true == atomic_compare_exchange_strong(&objects[id].is_active, &old_state, false)) {
+			timer_dequeue_objects.insert(id);
 		}
 	}
 }
@@ -275,6 +286,8 @@ void do_move(int p_id, DIRECTION dir) {
 					objects[pl].m_vl.unlock();
 
 				}
+			}else{
+				sleep_npc(pl);
 			}
 		}
 	}
@@ -530,6 +543,9 @@ void do_timer() {
 			TIMER_EVENT ev = timer_queue.top();
 			timer_queue.pop();
 			timer_l.unlock();
+			if(timer_dequeue_objects.count(ev.object) != 0){
+				return;
+			}
 			EX_OVER* ex_over = new EX_OVER;
 			ex_over->m_op = OP_RANDOM_MOVE;
 			PostQueuedCompletionStatus(h_iocp, 1, ev.object, (LPOVERLAPPED)ex_over);
