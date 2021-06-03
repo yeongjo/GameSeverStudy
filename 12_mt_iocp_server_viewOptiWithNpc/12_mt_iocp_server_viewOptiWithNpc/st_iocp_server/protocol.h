@@ -3,10 +3,10 @@
 constexpr int MAX_NAME = 100;
 constexpr int MAX_BUFFER = 1024;
 constexpr short SERVER_PORT = 3500;
-constexpr int WORLD_X_SIZE = 2000;
-constexpr int WORLD_Y_SIZE = 2000;
-constexpr int MAX_USER = 205000;
-constexpr int NPC_START = 5000;
+constexpr int WORLD_X_SIZE = 4000;
+constexpr int WORLD_Y_SIZE = 4000;
+constexpr int NPC_START = 17000;
+constexpr int MAX_USER = 200000+ NPC_START;
 
 constexpr unsigned char C2S_LOGIN = 1;
 constexpr unsigned char C2S_MOVE = 2;

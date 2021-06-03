@@ -258,7 +258,7 @@ void Worker_Thread()
 
 constexpr int DELAY_LIMIT = 100;
 constexpr int DELAY_LIMIT2 = 150;
-constexpr int ACCEPT_DELY = 10;
+constexpr int ACCEPT_DELY = 4;
 constexpr int DISCONNECT_DELY = (ACCEPT_DELY *10);
 
 void Adjust_Number_Of_Client()

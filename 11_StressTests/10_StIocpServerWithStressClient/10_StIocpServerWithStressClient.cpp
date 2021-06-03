@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <WS2tcpip.h>
 #include <MSWSock.h>
-#include "../2021_WF_STRESS/st_iocp_server/st_iocp_server/protocol.h"
+#include "../mt_iocp_server_viewOptiSector/st_iocp_server/protocol.h"
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "MSWSock.lib")
 using namespace std;

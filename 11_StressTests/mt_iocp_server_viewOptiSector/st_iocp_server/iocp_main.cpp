@@ -151,7 +151,7 @@ struct SESSION {
 
 constexpr int SERVER_ID = 0;
 int VIEW_RADIUS = 5;
-array <SESSION, MAX_USER + 1> players;
+array <SESSION, MAX_USER + 1> objects;
 
 struct SECTOR {
 	unordered_set<int> m_sector;
@@ -178,13 +178,13 @@ void send_packet(int p_id, void* p, bool dont_call_disconnect = false) {
 	//cout << "To client [" << p_id << "] : ";
 	//cout << "Packet [" << p_type << "]\n";
 	//EX_OVER* s_over = new EX_OVER;
-	EX_OVER* s_over = &players[p_id].sendExOverManager.get();
+	EX_OVER* s_over = &objects[p_id].sendExOverManager.get();
 	s_over->m_op = OP_SEND;
 	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
 	memcpy(s_over->m_packetbuf, p, p_size);
 	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
 	s_over->m_wsabuf[0].len = p_size;
-	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1,
+	int ret = WSASend(objects[p_id].m_socket, s_over->m_wsabuf, 1,
 		NULL, 0, &s_over->m_over, 0);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
@@ -199,14 +199,14 @@ void send_packet(int p_id, void* p, bool dont_call_disconnect = false) {
 
 void do_recv(int key) {
 
-	players[key].m_recv_over.m_wsabuf[0].buf =
-		reinterpret_cast<char*>(players[key].m_recv_over.m_packetbuf)
-		+ players[key].m_prev_size;
-	players[key].m_recv_over.m_wsabuf[0].len = MAX_BUFFER - players[key].m_prev_size;
-	memset(&players[key].m_recv_over.m_over, 0, sizeof(players[key].m_recv_over.m_over));
+	objects[key].m_recv_over.m_wsabuf[0].buf =
+		reinterpret_cast<char*>(objects[key].m_recv_over.m_packetbuf)
+		+ objects[key].m_prev_size;
+	objects[key].m_recv_over.m_wsabuf[0].len = MAX_BUFFER - objects[key].m_prev_size;
+	memset(&objects[key].m_recv_over.m_over, 0, sizeof(objects[key].m_recv_over.m_over));
 	DWORD r_flag = 0;
-	int ret = WSARecv(players[key].m_socket, players[key].m_recv_over.m_wsabuf, 1,
-		NULL, &r_flag, &players[key].m_recv_over.m_over, NULL);
+	int ret = WSARecv(objects[key].m_socket, objects[key].m_recv_over.m_wsabuf, 1,
+		NULL, &r_flag, &objects[key].m_recv_over.m_over, NULL);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no)
@@ -215,7 +215,7 @@ void do_recv(int key) {
 }
 
 bool can_see(int id_a, int id_b) {
-	return VIEW_RADIUS >= abs(players[id_a].x - players[id_b].x) && VIEW_RADIUS >= abs(players[id_a].y - players[id_b].y);
+	return VIEW_RADIUS >= abs(objects[id_a].x - objects[id_b].x) && VIEW_RADIUS >= abs(objects[id_a].y - objects[id_b].y);
 }
 
 /// <summary>
@@ -228,7 +228,7 @@ bool can_see(int id_a, int id_b) {
 void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int> main_sector) {
 	auto& other_set = world_sector[y][x].m_sector;
 	for (auto id : other_set) {
-		if (id == p_id || players[id].m_state != PLST_INGAME || !can_see(p_id, id)) {
+		if (id == p_id || objects[id].m_state != PLST_INGAME || !can_see(p_id, id)) {
 			continue;
 		}
 		main_sector.push_back(id);
@@ -241,22 +241,22 @@ void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int> main_
 /// <param name="p_id"></param>
 /// <returns></returns>
 vector<int>& get_overlapped_sector(int p_id) {
-	int y = players[p_id].y;
-	int x = players[p_id].x;
+	int y = objects[p_id].y;
+	int x = objects[p_id].x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
 	auto sector_x = x / WORLD_SECTOR_SIZE;
 	auto& main_sector = world_sector[sector_y][sector_x];
 
 	int i = 0;
 	main_sector.m_sector_lock.lock();
-	players[p_id].m_selected_sector.clear();
+	objects[p_id].m_selected_sector.clear();
 	for (auto iter : main_sector.m_sector){
-		if (iter != p_id && players[iter].m_state == PLST_INGAME && can_see(iter, p_id)){
-			players[p_id].m_selected_sector.push_back(iter);
+		if (iter != p_id && objects[iter].m_state == PLST_INGAME && can_see(iter, p_id)){
+			objects[p_id].m_selected_sector.push_back(iter);
 		}
 	}
 	main_sector.m_sector_lock.unlock();
-	auto& selected_sector = players[p_id].m_selected_sector;
+	auto& selected_sector = objects[p_id].m_selected_sector;
 
 	auto sector_view_frustum_top = (y - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
 	auto sector_view_frustum_bottom = (y + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
@@ -297,11 +297,11 @@ vector<int>& get_overlapped_sector(int p_id) {
 
 int get_new_player_id(SOCKET p_socket) {
 	for (int i = SERVER_ID + 1; i <= MAX_USER; ++i) {
-		lock_guard<mutex> lg{ players[i].m_slock };
-		if (PLST_FREE == players[i].m_state) {
-			players[i].m_state = PLST_CONNECTED;
-			players[i].m_socket = p_socket;
-			players[i].m_name[0] = 0;
+		lock_guard<mutex> lg{ objects[i].m_slock };
+		if (PLST_FREE == objects[i].m_state) {
+			objects[i].m_state = PLST_CONNECTED;
+			objects[i].m_socket = p_socket;
+			objects[i].m_name[0] = 0;
 			return i;
 		}
 	}
@@ -316,8 +316,8 @@ void send_login_ok_packet(int p_id) {
 	p.race = 1;
 	p.size = sizeof(p);
 	p.type = S2C_LOGIN_OK;
-	p.x = players[p_id].x;
-	p.y = players[p_id].y;
+	p.x = objects[p_id].x;
+	p.y = objects[p_id].y;
 	send_packet(p_id, &p);
 }
 
@@ -326,24 +326,24 @@ void send_move_packet(int c_id, int p_id) {
 	p.id = p_id;
 	p.size = sizeof(p);
 	p.type = S2C_MOVE_PLAYER;
-	p.x = players[p_id].x;
-	p.y = players[p_id].y;
-	p.move_time = players[p_id].move_time;
+	p.x = objects[p_id].x;
+	p.y = objects[p_id].y;
+	p.move_time = objects[p_id].move_time;
 	send_packet(c_id, &p);
 }
 
-void send_add_player(int c_id, int p_id) {
+void send_add_object(int c_id, int p_id) {
 	s2c_add_player p;
 	p.id = p_id;
 	p.size = sizeof(p);
 	p.type = S2C_ADD_PLAYER;
-	p.x = players[p_id].x;
-	p.y = players[p_id].y;
+	p.x = objects[p_id].x;
+	p.y = objects[p_id].y;
 	p.race = 0;
 	send_packet(c_id, &p);
 }
 
-void send_remove_player(int c_id, int p_id, bool dont_call_disconnect = false) {
+void send_remove_object(int c_id, int p_id, bool dont_call_disconnect = false) {
 	s2c_remove_player p;
 	p.id = p_id;
 	p.size = sizeof(p);
@@ -352,8 +352,8 @@ void send_remove_player(int c_id, int p_id, bool dont_call_disconnect = false) {
 }
 
 void do_move(int p_id, DIRECTION dir) {
-	auto& x = players[p_id].x;
-	auto& y = players[p_id].y;
+	auto& x = objects[p_id].x;
+	auto& y = objects[p_id].y;
 	auto sector_view_frustum_y = y / WORLD_SECTOR_SIZE;
 	auto sector_view_frustum_x = x / WORLD_SECTOR_SIZE;
 	switch (dir) {
@@ -376,41 +376,41 @@ void do_move(int p_id, DIRECTION dir) {
 		}
 	}
 	
-	players[p_id].m_vl.lock();
-	players[p_id].m_old_view_list.resize(players[p_id].m_view_list.size());
-	//memcpy(&*players[p_id].m_old_view_list.begin(), &*players[p_id].m_view_list.begin(), players[p_id].m_old_view_list.size() * sizeof(int));
-	std::copy(players[p_id].m_view_list.begin(), players[p_id].m_view_list.end(), players[p_id].m_old_view_list.begin());
-	auto& m_old_view_list = players[p_id].m_old_view_list;
-	players[p_id].m_vl.unlock();
+	objects[p_id].m_vl.lock();
+	objects[p_id].m_old_view_list.resize(objects[p_id].m_view_list.size());
+	//memcpy(&*objects[p_id].m_old_view_list.begin(), &*objects[p_id].m_view_list.begin(), objects[p_id].m_old_view_list.size() * sizeof(int));
+	std::copy(objects[p_id].m_view_list.begin(), objects[p_id].m_view_list.end(), objects[p_id].m_old_view_list.begin());
+	auto& m_old_view_list = objects[p_id].m_old_view_list;
+	objects[p_id].m_vl.unlock();
 	auto&& new_vl = get_overlapped_sector(p_id);
 
 	send_move_packet(p_id, p_id);
 	for (auto pl : new_vl) {
 		if (m_old_view_list.end() == std::find(m_old_view_list.begin(), m_old_view_list.end(), pl)) {	//1. 새로 시야에 들어오는 플레이어
-			players[p_id].m_vl.lock();
-			players[p_id].m_view_list.insert(pl);
-			players[p_id].m_vl.unlock();
-			send_add_player(p_id, pl);
+			objects[p_id].m_vl.lock();
+			objects[p_id].m_view_list.insert(pl);
+			objects[p_id].m_vl.unlock();
+			send_add_object(p_id, pl);
 
-			players[pl].m_vl.lock();
-			if (0 == players[pl].m_view_list.count(p_id)) {
-				players[pl].m_view_list.insert(p_id);
-				players[pl].m_vl.unlock();
-				send_add_player(pl, p_id);
+			objects[pl].m_vl.lock();
+			if (0 == objects[pl].m_view_list.count(p_id)) {
+				objects[pl].m_view_list.insert(p_id);
+				objects[pl].m_vl.unlock();
+				send_add_object(pl, p_id);
 				//cout << "시야추가1: " << pl << ", " << p_id << endl;
 			} else {
-				players[pl].m_vl.unlock();
+				objects[pl].m_vl.unlock();
 				send_move_packet(pl, p_id);
 			}
 		} else {						//2. 기존 시야에도 있고 새 시야에도 있는 경우
-			players[pl].m_vl.lock();
-			if (0 == players[pl].m_view_list.count(p_id)) {
-				players[pl].m_view_list.insert(p_id);
-				players[pl].m_vl.unlock();
-				send_add_player(pl, p_id);
+			objects[pl].m_vl.lock();
+			if (0 == objects[pl].m_view_list.count(p_id)) {
+				objects[pl].m_view_list.insert(p_id);
+				objects[pl].m_vl.unlock();
+				send_add_object(pl, p_id);
 				//cout << "시야추가2: " << pl << ", " << p_id << endl;
 			} else {
-				players[pl].m_vl.unlock();
+				objects[pl].m_vl.unlock();
 				send_move_packet(pl, p_id);
 			}
 		}
@@ -418,19 +418,19 @@ void do_move(int p_id, DIRECTION dir) {
 	for (auto pl : m_old_view_list) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), pl)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			players[p_id].m_vl.lock();
-			players[p_id].m_view_list.erase(pl);
-			players[p_id].m_vl.unlock();
-			send_remove_player(p_id, pl);
+			objects[p_id].m_vl.lock();
+			objects[p_id].m_view_list.erase(pl);
+			objects[p_id].m_vl.unlock();
+			send_remove_object(p_id, pl);
 			//cout << "시야에서 사라짐: " << pl << endl;
 
-			players[pl].m_vl.lock();
-			if (0 != players[pl].m_view_list.count(p_id)) {
-				players[pl].m_view_list.erase(p_id);
-				players[pl].m_vl.unlock();
-				send_remove_player(pl, p_id);
+			objects[pl].m_vl.lock();
+			if (0 != objects[pl].m_view_list.count(p_id)) {
+				objects[pl].m_view_list.erase(p_id);
+				objects[pl].m_vl.unlock();
+				send_remove_object(pl, p_id);
 			} else {
-				players[pl].m_vl.unlock();
+				objects[pl].m_vl.unlock();
 			}
 		}
 	}
@@ -440,15 +440,15 @@ void process_packet(int p_id, unsigned char* p_buf) {
 	switch (p_buf[1]) {
 	case C2S_LOGIN: {
 		c2s_login* packet = reinterpret_cast<c2s_login*>(p_buf);
-		players[p_id].m_state = PLST_INGAME;
+		objects[p_id].m_state = PLST_INGAME;
 		{
-			lock_guard <mutex> gl1{ players[p_id].m_slock };
-			strcpy_s(players[p_id].m_name, packet->name);
-			//players[p_id].x = 1;
-			//players[p_id].y = 1;
-			players[p_id].x = rand() % WORLD_X_SIZE;
-			players[p_id].y = rand() % WORLD_Y_SIZE;
-			auto& sector = world_sector[players[p_id].y / WORLD_SECTOR_SIZE][players[p_id].x / WORLD_SECTOR_SIZE];
+			lock_guard <mutex> gl1{ objects[p_id].m_slock };
+			strcpy_s(objects[p_id].m_name, packet->name);
+			//objects[p_id].x = 1;
+			//objects[p_id].y = 1;
+			objects[p_id].x = rand() % WORLD_X_SIZE;
+			objects[p_id].y = rand() % WORLD_Y_SIZE;
+			auto& sector = world_sector[objects[p_id].y / WORLD_SECTOR_SIZE][objects[p_id].x / WORLD_SECTOR_SIZE];
 			lock_guard <mutex> gl2{ sector.m_sector_lock };
 			sector.m_sector.insert(p_id);
 		}
@@ -456,21 +456,21 @@ void process_packet(int p_id, unsigned char* p_buf) {
 
 		auto&& selected_sector = get_overlapped_sector(p_id);
 
-		players[p_id].m_vl.lock();
+		objects[p_id].m_vl.lock();
 		for (auto id : selected_sector) {
-			players[p_id].m_view_list.insert(id);
+			objects[p_id].m_view_list.insert(id);
 		}
-		players[p_id].m_vl.unlock();
+		objects[p_id].m_vl.unlock();
 		for (auto id : selected_sector) {
-			send_add_player(id, p_id);
+			send_add_object(id, p_id);
 		}
 
 		for(auto id : selected_sector){
-			auto& pl = players[id];
+			auto& pl = objects[id];
 			pl.m_vl.lock();
 			pl.m_view_list.insert(p_id);
 			pl.m_vl.unlock();
-			send_add_player(p_id, id);
+			send_add_object(p_id, id);
 		}
 
 
@@ -478,7 +478,7 @@ void process_packet(int p_id, unsigned char* p_buf) {
 	}
 	case C2S_MOVE: {
 		c2s_move* packet = reinterpret_cast<c2s_move*>(p_buf);
-		players[p_id].move_time = packet->move_time;
+		objects[p_id].move_time = packet->move_time;
 		do_move(p_id, packet->dr);
 		break;
 	}
@@ -490,15 +490,15 @@ void process_packet(int p_id, unsigned char* p_buf) {
 }
 
 void disconnect(int p_id) {
-	if (players[p_id].m_state == PLST_FREE) {
+	if (objects[p_id].m_state == PLST_FREE) {
 		return;
 	}
-	closesocket(players[p_id].m_socket);
-	players[p_id].m_state = PLST_FREE;
-	players[p_id].sendExOverManager.clearSendData();
+	closesocket(objects[p_id].m_socket);
+	objects[p_id].m_state = PLST_FREE;
+	objects[p_id].sendExOverManager.clearSendData();
 
-	int y = players[p_id].y;
-	int x = players[p_id].x;
+	int y = objects[p_id].y;
+	int x = objects[p_id].x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
 	auto sector_x = x / WORLD_SECTOR_SIZE;
 	for (int y=-1;y<=1;++y){
@@ -513,16 +513,15 @@ void disconnect(int p_id) {
 		}
 	}
 
-	players[p_id].m_vl.lock();
-	players[p_id].m_old_view_list.resize(players[p_id].m_view_list.size());
-	//memcpy(&*players[p_id].m_old_view_list.begin(), &*players[p_id].m_view_list.begin(), players[p_id].m_old_view_list.size() * sizeof(int));
-	std::copy(players[p_id].m_view_list.begin(), players[p_id].m_view_list.end(), players[p_id].m_old_view_list.begin());
-	players[p_id].m_view_list.clear();
-	players[p_id].m_vl.unlock();
-	auto& m_old_view_list = players[p_id].m_old_view_list;
+	objects[p_id].m_vl.lock();
+	objects[p_id].m_old_view_list.resize(objects[p_id].m_view_list.size());
+	std::copy(objects[p_id].m_view_list.begin(), objects[p_id].m_view_list.end(), objects[p_id].m_old_view_list.begin());
+	objects[p_id].m_view_list.clear();
+	objects[p_id].m_vl.unlock();
+	auto& m_old_view_list = objects[p_id].m_old_view_list;
 	for (auto pl : m_old_view_list) {
-		if (PLST_INGAME == players[pl].m_state)
-			send_remove_player(players[pl].id, p_id);
+		if (PLST_INGAME == objects[pl].m_state)
+			send_remove_object(objects[pl].id, p_id);
 	}
 }
 
@@ -554,7 +553,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 		switch (ex_over->m_op) {
 		case OP_RECV: {
 			unsigned char* packet_ptr = ex_over->m_packetbuf;
-			int num_data = num_bytes + players[key].m_prev_size;
+			int num_data = num_bytes + objects[key].m_prev_size;
 			int packet_size = packet_ptr[0];
 
 			while (num_data >= packet_size) {
@@ -564,7 +563,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 				if (0 >= num_data) break;
 				packet_size = packet_ptr[0];
 			}
-			players[key].m_prev_size = num_data;
+			objects[key].m_prev_size = num_data;
 			if (0 != num_data)
 				memcpy(ex_over->m_packetbuf, packet_ptr, num_data);
 			do_recv(key);
@@ -572,19 +571,19 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 					break;
 		case OP_SEND: {
 			auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over);
-			players[key].sendExOverManager.recycle(usableGroup);
+			objects[key].sendExOverManager.recycle(usableGroup);
 			break;
 		}
 		case OP_ACCEPT: {
 			int c_id = get_new_player_id(ex_over->m_csocket);
 			if (-1 != c_id) {
-				players[c_id].m_recv_over.m_op = OP_RECV;
-				players[c_id].m_prev_size = 0;
+				objects[c_id].m_recv_over.m_op = OP_RECV;
+				objects[c_id].m_prev_size = 0;
 				CreateIoCompletionPort(
-					reinterpret_cast<HANDLE>(players[c_id].m_socket), h_iocp, c_id, 0);
+					reinterpret_cast<HANDLE>(objects[c_id].m_socket), h_iocp, c_id, 0);
 				do_recv(c_id);
 			} else {
-				closesocket(players[c_id].m_socket);
+				closesocket(objects[c_id].m_socket);
 			}
 
 			memset(&ex_over->m_over, 0, sizeof(ex_over->m_over));
@@ -592,8 +591,8 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			ex_over->m_csocket = c_socket;
 			AcceptEx(l_socket, c_socket,
 				ex_over->m_packetbuf, 0, 32, 32, NULL, &ex_over->m_over);
+			break;
 		}
-					  break;
 		}
 	}
 
@@ -603,7 +602,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 
 int main() {
 	for (int i = 0; i < MAX_USER + 1; ++i) {
-		auto& pl = players[i];
+		auto& pl = objects[i];
 		pl.id = i;
 		pl.m_state = PLST_FREE;
 	}
