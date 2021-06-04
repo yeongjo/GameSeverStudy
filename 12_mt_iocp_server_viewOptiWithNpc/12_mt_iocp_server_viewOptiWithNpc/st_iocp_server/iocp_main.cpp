@@ -5,6 +5,7 @@
 #include <mutex>
 #include <array>
 #include <queue>
+#include <set>
 #include <unordered_set>
 using namespace std;
 #include <WS2tcpip.h>
@@ -28,7 +29,7 @@ constexpr int32_t ceil_const(float num) {
 		: static_cast<int32_t>(num) + ((num > 0) ? 1 : 0);
 }
 
-constexpr int WORLD_SECTOR_SIZE = WORLD_WIDTH / 15;
+constexpr int WORLD_SECTOR_SIZE = (VIEW_RADIUS + 2);
 constexpr int WORLD_SECTOR_X_COUNT = ceil_const(WORLD_WIDTH / (float)WORLD_SECTOR_SIZE);
 constexpr int WORLD_SECTOR_Y_COUNT = ceil_const(WORLD_HEIGHT / (float)WORLD_SECTOR_SIZE);
 
@@ -56,20 +57,20 @@ struct SendExOverManager {
 	struct ExOverUsableGroup {
 	private:
 		EX_OVER ex_over;
-		bool is_used = false;
+		//bool is_used = false;
 		SendExOverManager* manager;
 
 	public:
 		ExOverUsableGroup(SendExOverManager* manager) : manager(manager) {
 
 		}
-		void setIsUsed(bool used) {
-			is_used = used;
-		}
+		//void setIsUsed(bool used) {
+		//	is_used = used;
+		//}
 
-		bool getIsUsed() const {
-			return is_used;
-		}
+		//bool getIsUsed() const {
+		//	return is_used;
+		//}
 
 		EX_OVER& getExOver() {
 			return ex_over;
@@ -88,9 +89,9 @@ struct SendExOverManager {
 
 private:
 	vector<ExOverUsableGroup*> m_send_over;
+	mutex m_send_over_vector_lock;
 	vector<unsigned char> m_send_data;
 	mutex m_send_data_lock;
-	mutex m_send_over_vector_lock;
 
 public:
 	SendExOverManager() {
@@ -112,8 +113,8 @@ public:
 	}
 
 	void addSendData(void* p) {
-		lock_guard<mutex> lg{ m_send_data_lock };
 		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
+		m_send_data_lock.lock();
 
 		auto prev_size = m_send_data.size();
 		auto send_data_total_size = prev_size + static_cast<size_t>(p_size);
@@ -121,15 +122,17 @@ public:
 		//if (prev_size > 20) {
 		//	cout << "packet size: " << +p_size << "; prev_size: " << prev_size << "; send_data_total_size: " << send_data_total_size << endl;
 		//}
-		memcpy(static_cast<void*>(&m_send_data[prev_size]), p, p_size);
+		memcpy(&m_send_data[prev_size], p, p_size);
+		m_send_data_lock.unlock();
 	}
 
 	void clearSendData() {
-		lock_guard<mutex> lg{ m_send_data_lock };
+		m_send_data_lock.lock();
 		m_send_data.clear();
-		for (int i = 0; i < m_send_over.size(); ++i) {
-			m_send_over[0]->setIsUsed(false);
-		}
+		m_send_data_lock.unlock();
+		//for (int i = 0; i < m_send_over.size(); ++i) {
+		//	m_send_over[i]->setIsUsed(false);
+		//}
 	}
 
 	void sendAddedData(int p_id);
@@ -150,13 +153,13 @@ public:
 			send_ex_over = m_send_over[size - 1];
 			m_send_over.pop_back();
 		}
-		send_ex_over->setIsUsed(true);
+		//send_ex_over->setIsUsed(true);
 		return send_ex_over->getExOver();
 	}
 
 private:
 	void recycle(ExOverUsableGroup* usableGroup) {
-		usableGroup->setIsUsed(false);
+		//usableGroup->setIsUsed(false);
 		lock_guard<mutex> lg{ m_send_over_vector_lock };
 		m_send_over.push_back(usableGroup);
 	}
@@ -174,38 +177,36 @@ struct TIMER_EVENT {
 };
 
 priority_queue<TIMER_EVENT> timer_queue;
-unordered_set<int> timer_dequeue_objects;
 mutex timer_l;
 HANDLE h_iocp;
+
+struct SESSION {
+	mutex  m_slock;
+	atomic<PL_STATE> m_state;
+	SOCKET m_socket;
+	EX_OVER m_recv_over;
+
+	int m_prev_size;
+
+	SendExOverManager sendExOverManager;
+};
 
 struct S_ACTOR {
 	int		id;
 	char m_name[200];
 	short	x, y;
+	int move_time;
 	atomic_bool is_active;
 	vector<int> m_selected_sector;
 	vector<int> m_old_view_list;
 	unordered_set<int> m_view_set;
 	mutex m_vl;
 	NPC_OVER npcOver;
+	SESSION* session;
 };
-
-struct SESSION : public S_ACTOR {
-	mutex  m_slock;
-	atomic<PL_STATE> m_state;
-	SOCKET m_socket;
-	EX_OVER m_recv_over;
-	
-	int m_prev_size;
-	int move_time;
-	
-	SendExOverManager sendExOverManager;
-};
-
 
 constexpr int SERVER_ID = 0;
-array <S_ACTOR, MAX_NPC> npcs;
-array <SESSION, MAX_PLAYER> players;
+array <S_ACTOR, MAX_USER+1> actors;
 void disconnect(int p_id);
 void do_npc_random_move(S_ACTOR& npc);
 
@@ -214,7 +215,7 @@ bool is_npc(int id) {
 }
 
 S_ACTOR* get_actor(int id) {
-	return is_npc(id) ? &npcs[id - NPC_START - 1] : &players[id - 1];
+	return &actors[id];
 }
 
 struct SECTOR {
@@ -244,7 +245,7 @@ void SendExOverManager::sendAddedData(int p_id) {
 	std::copy(m_send_data.begin(), m_send_data.end(), copyed_send_data.begin());
 	m_send_data.clear();
 	m_send_data_lock.unlock();
-	auto session = static_cast<SESSION*>(get_actor(p_id));
+	auto session = get_actor(p_id)->session;
 	while (!copyed_send_data.empty()) {
 		auto send_data_begin = copyed_send_data.begin();
 		auto p_size = min(MAX_BUFFER, (int)copyed_send_data.size());
@@ -282,8 +283,7 @@ void add_event(int obj, OP_TYPE ev_t, int delay_ms) {
 
 void send_packet(int p_id, void* p) {
 	add_event(p_id, OP_DELAY_SEND, 12);
-	--p_id; // SERVER_ID때문에 id가 1부터 시작해서 배열에 쓸라면 1빼야함
-	players[p_id].sendExOverManager.addSendData(p);
+	actors[p_id].session->sendExOverManager.addSendData(p);
 	//int p_size = reinterpret_cast<unsigned char*>(p)[0];
 	//int p_type = reinterpret_cast<unsigned char*>(p)[1];
 	//cout << "To client [" << p_id << "] : ";
@@ -306,14 +306,13 @@ void send_packet(int p_id, void* p) {
 }
 
 void do_recv(int key) {
-	--key; // SERVER_ID때문에 id가 1부터 시작해서 배열에 쓸라면 1빼야함
-	players[key].m_recv_over.m_wsabuf[0].buf =
-		reinterpret_cast<char*>(players[key].m_recv_over.m_packetbuf)
-		+ players[key].m_prev_size;
-	players[key].m_recv_over.m_wsabuf[0].len = MAX_BUFFER - players[key].m_prev_size;
-	memset(&players[key].m_recv_over.m_over, 0, sizeof(players[key].m_recv_over.m_over));
+	actors[key].session->m_recv_over.m_wsabuf[0].buf =
+		reinterpret_cast<char*>(actors[key].session->m_recv_over.m_packetbuf)
+		+ actors[key].session->m_prev_size;
+	actors[key].session->m_recv_over.m_wsabuf[0].len = MAX_BUFFER - actors[key].session->m_prev_size;
+	memset(&actors[key].session->m_recv_over.m_over, 0, sizeof(actors[key].session->m_recv_over.m_over));
 	DWORD r_flag = 0;
-	int ret = WSARecv(players[key].m_socket, players[key].m_recv_over.m_wsabuf, 1, NULL, &r_flag, &players[key].m_recv_over.m_over, NULL);
+	int ret = WSARecv(actors[key].session->m_socket, actors[key].session->m_recv_over.m_wsabuf, 1, NULL, &r_flag, &actors[key].session->m_recv_over.m_over, NULL);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no)
@@ -322,13 +321,13 @@ void do_recv(int key) {
 }
 
 int get_new_player_id(SOCKET p_socket) {
-	for (int i = 0; i < MAX_PLAYER; ++i) {
-		if (PLST_FREE == players[i].m_state) {
-			lock_guard<mutex> lg{ players[i].m_slock };
-			players[i].m_state = PLST_CONNECTED;
-			players[i].m_socket = p_socket;
-			players[i].m_name[0] = 0;
-			return ++i; // SERVER_ID 때문에 +1된거 넘김
+	for (int i = 1; i <= MAX_PLAYER; ++i) {
+		if (PLST_FREE == actors[i].session->m_state) {
+			lock_guard<mutex> lg{ actors[i].session->m_slock };
+			actors[i].session->m_state = PLST_CONNECTED;
+			actors[i].session->m_socket = p_socket;
+			actors[i].m_name[0] = 0;
+			return i; // SERVER_ID 때문에 +1된거 넘김
 		}
 	}
 	return -1;
@@ -356,8 +355,7 @@ void send_move_packet(int c_id, int p_id) {
 	auto actor = get_actor(p_id);
 	p.x = actor->x;
 	p.y = actor->y;
-	p.move_time = is_npc(p_id) ? chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now().time_since_epoch()).count() :
-		static_cast<SESSION*>(actor)->move_time;
+	p.move_time = actor->move_time;
 	send_packet(c_id, &p);
 }
 
@@ -385,8 +383,12 @@ void send_remove_object(int c_id, int p_id) {
 bool can_see(int id_a, int id_b) {
 	auto actor_a = get_actor(id_a);
 	auto actor_b = get_actor(id_b);
+	int ax = actor_a->x;
+	int ay = actor_a->y;
+	int bx = actor_b->x;
+	int by = actor_b->y;
 	return VIEW_RADIUS >= 
-		abs(actor_a->x - actor_b->x) + abs(actor_a->y - actor_b->y);
+		abs(ax - bx) + abs(ay - by);
 }
 /// <summary>
 /// p_id를 가진 플레이어를 제외하고 해당 좌표 섹터에 있는 플레이어를 main_sector에 추가합니다.
@@ -399,7 +401,7 @@ void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int> main_
 	auto& other_set = world_sector[y][x].m_sector;
 	auto isNpc = is_npc(p_id);
 	for (auto id : other_set) {
-		if (isNpc == is_npc(id) || !can_see(p_id, id) || id == p_id || (!is_npc(id) && players[id].m_state != PLST_INGAME)) {
+		if (isNpc == is_npc(id) || !can_see(p_id, id) || id == p_id || (!is_npc(id) && actors[id].session->m_state != PLST_INGAME)) {
 			continue;
 		}
 		main_sector.push_back(id);
@@ -412,26 +414,22 @@ void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int> main_
 /// <param name="p_id"></param>
 /// <returns></returns>
 vector<int>& get_id_from_overlapped_sector(int p_id) {
-	auto actor = static_cast<SESSION*>(get_actor(p_id));
+	auto actor = get_actor(p_id);
 	int y = actor->y;
 	int x = actor->x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
 	auto sector_x = x / WORLD_SECTOR_SIZE;
 	auto& main_sector = world_sector[sector_y][sector_x];
 
-	actor->m_selected_sector.clear();
+	auto& selected_sector = actor->m_selected_sector;
+	selected_sector.clear();
 	main_sector.m_sector_lock.lock();
-	for (auto iter : main_sector.m_sector) {
-		auto iter_is_npc = is_npc(iter);
-		if (iter != actor->id &&
-			(iter_is_npc || 
-				!iter_is_npc && static_cast<SESSION*>(get_actor(iter))->m_state == PLST_INGAME)&&
-			can_see(iter, actor->id)) {
-			actor->m_selected_sector.push_back(iter);
+	for (auto id : main_sector.m_sector) {
+		if(id != actor->id && can_see(id, actor->id)){
+			selected_sector.push_back(id);
 		}
 	}
 	main_sector.m_sector_lock.unlock();
-	auto& selected_sector = actor->m_selected_sector;
 
 	auto sector_view_frustum_top = (y - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
 	auto sector_view_frustum_bottom = (y + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
@@ -470,7 +468,7 @@ void wake_up_npc(int id) {
 	if(actor->is_active == false){
 		bool old_state = false;
 		if(true == atomic_compare_exchange_strong(&actor->is_active, &old_state, true)){
-			timer_dequeue_objects.erase(id);
+			//cout << "wake up id: " << id << " is active: "<< actor->is_active << endl;
 			add_event(id, OP_RANDOM_MOVE, 1000);
 		}
 	}
@@ -478,12 +476,8 @@ void wake_up_npc(int id) {
 
 void sleep_npc(int id) {
 	auto actor = get_actor(id);
-	if (actor->is_active == true) {
-		bool old_state = true;
-		if (true == atomic_compare_exchange_strong(&actor->is_active, &old_state, false)) {
-			timer_dequeue_objects.insert(id);
-		}
-	}
+	actor->is_active = false;
+	//cout << "sleep id: " << id << endl;
 }
 
 void do_move(int p_id, DIRECTION dir);
@@ -493,18 +487,18 @@ void process_packet(int p_id, unsigned char* p_buf) {
 	switch (p_buf[1]) {
 	case C2S_LOGIN: {
 		c2s_login* packet = reinterpret_cast<c2s_login*>(p_buf);
-		auto session = static_cast<SESSION*>(get_actor(p_id));
-		session->m_state = PLST_INGAME;
+		auto actor1 = get_actor(p_id);
+		actor1->session->m_state = PLST_INGAME;
 		{
-			lock_guard <mutex> gl1{ session->m_slock };
-			strcpy_s(session->m_name, packet->name);
+			lock_guard <mutex> gl1{ actor1->session->m_slock };
+			strcpy_s(actor1->m_name, packet->name);
 			//session->x = 1;
 			//session->y = 1;
-			session->x = rand() % WORLD_X_SIZE;
-			session->y = rand() % WORLD_Y_SIZE;
+			actor1->x = rand() % WORLD_X_SIZE;
+			actor1->y = rand() % WORLD_Y_SIZE;
 		}
 		{
-			auto& sector = world_sector[session->y / WORLD_SECTOR_SIZE][session->x / WORLD_SECTOR_SIZE];
+			auto& sector = world_sector[actor1->y / WORLD_SECTOR_SIZE][actor1->x / WORLD_SECTOR_SIZE];
 			lock_guard <mutex> gl2{ sector.m_sector_lock };
 			sector.m_sector.insert(p_id);
 		}
@@ -512,31 +506,29 @@ void process_packet(int p_id, unsigned char* p_buf) {
 
 		auto&& selected_sector = get_id_from_overlapped_sector(p_id);
 
-		session->m_vl.lock();
+		actor1->m_vl.lock();
 		for (auto id : selected_sector) {
-			session->m_view_set.insert(id);
+			actor1->m_view_set.insert(id);
 		}
-		session->m_vl.unlock();
+		actor1->m_vl.unlock();
 		for (auto id : selected_sector) {
-			auto actor = get_actor(id);
-			auto& pl = actor;
+			auto actor2 = get_actor(id);
 			send_add_object(p_id, id);
 			if (!is_npc(id)) {
 				send_add_object(id, p_id);
-				auto session1 = static_cast<SESSION*>(actor);
-				session1->m_vl.lock();
-				session1->m_view_set.insert(p_id);
-				session1->m_vl.unlock();
+				actor2->m_vl.lock();
+				actor2->m_view_set.insert(p_id);
+				actor2->m_vl.unlock();
 			} else {
-				wake_up_npc(actor->id);
+				wake_up_npc(actor2->id);
 			}
 		}
 		break;
 	}
 	case C2S_MOVE: {
 		c2s_move* packet = reinterpret_cast<c2s_move*>(p_buf);
-		auto session = static_cast<SESSION*>(get_actor(p_id));
-		session->move_time = packet->move_time;
+		auto actor = get_actor(p_id);
+		actor->move_time = packet->move_time;
 		do_move(p_id, packet->dr);
 		break;
 	}
@@ -549,7 +541,8 @@ void process_packet(int p_id, unsigned char* p_buf) {
 }
 
 void disconnect(int p_id) {
-	auto session = static_cast<SESSION*>(get_actor(p_id));
+	auto actor = get_actor(p_id);
+	auto session = actor->session;
 	if (session->m_state == PLST_FREE) {
 		return;
 	}
@@ -558,8 +551,8 @@ void disconnect(int p_id) {
 
 	// remove from sector
 	session->sendExOverManager.clearSendData();
-	int y = session->y;
-	int x = session->x;
+	int y = actor->y;
+	int x = actor->x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
 	auto sector_x = x / WORLD_SECTOR_SIZE;
 	for (int y = -1; y <= 1; ++y) {
@@ -575,19 +568,19 @@ void disconnect(int p_id) {
 	}
 	//
 
-	session->m_vl.lock();
-	session->m_old_view_list.resize(session->m_view_set.size());
-	std::copy(session->m_view_set.begin(), session->m_view_set.end(), session->m_old_view_list.begin());
-	session->m_view_set.clear();
-	session->m_vl.unlock();
-	auto& m_old_view_list = session->m_old_view_list;
+	actor->m_vl.lock();
+	actor->m_old_view_list.resize(actor->m_view_set.size());
+	std::copy(actor->m_view_set.begin(), actor->m_view_set.end(), actor->m_old_view_list.begin());
+	actor->m_view_set.clear();
+	actor->m_vl.unlock();
+	auto& m_old_view_list = actor->m_old_view_list;
 	for (auto pl : m_old_view_list) {
 		if (is_npc(pl)) {
 			break;
 		}
-		auto session2 = static_cast<SESSION*>(get_actor(p_id));
-		if (PLST_INGAME == session2->m_state){
-			send_remove_object(session2->id, p_id);
+		auto actor2 = get_actor(p_id);
+		if (PLST_INGAME == actor2->session->m_state){
+			send_remove_object(actor2->id, p_id);
 		}
 	}
 }
@@ -620,7 +613,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 		switch (ex_over->m_op) {
 		case OP_RECV: {
 			unsigned char* packet_ptr = ex_over->m_packetbuf;
-			auto session = static_cast<SESSION*>(get_actor(key));
+			auto session = get_actor(key)->session;
 			int num_data = num_bytes + session->m_prev_size;
 			int packet_size = packet_ptr[0];
 
@@ -644,7 +637,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 		}
 		case OP_ACCEPT: {
 			int c_id = get_new_player_id(ex_over->m_csocket);
-			auto session = static_cast<SESSION*>(get_actor(c_id));
+			auto session = get_actor(c_id)->session;
 			if (-1 != c_id) {
 				session->m_recv_over.m_op = OP_RECV;
 				session->m_prev_size = 0;
@@ -733,10 +726,10 @@ void do_npc_random_move(S_ACTOR& npc) {
 		}
 		if(oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), pl)){
 			// 플레이어의 시야에 등장
-			auto session = static_cast<SESSION*>(get_actor(pl));
-			session->m_vl.lock();
-			session->m_view_set.insert(npc.id);
-			session->m_vl.unlock();
+			auto actor = get_actor(pl);
+			actor->m_vl.lock();
+			actor->m_view_set.insert(npc.id);
+			actor->m_vl.unlock();
 			send_add_object(pl, npc.id);
 		}else{
 			// 플레이어가 계속 보고있음.
@@ -748,14 +741,14 @@ void do_npc_random_move(S_ACTOR& npc) {
 			continue;
 		}
 		if(new_vl.end() == std::find(new_vl.begin(), new_vl.end(), pl)){
-			auto session = static_cast<SESSION*>(get_actor(pl));
-			session->m_vl.lock();
-			if (session->m_view_set.count(pl) != 0) {
-				session->m_view_set.erase(pl);
-				session->m_vl.unlock();
+			auto actor = get_actor(pl);
+			actor->m_vl.lock();
+			if (actor->m_view_set.count(pl) != 0) {
+				actor->m_view_set.erase(pl);
+				actor->m_vl.unlock();
 				send_remove_object(pl, npc.id);
 			} else {
-				session->m_vl.unlock();
+				actor->m_vl.unlock();
 			}
 		}
 	}
@@ -763,9 +756,9 @@ void do_npc_random_move(S_ACTOR& npc) {
 
 
 void do_move(int p_id, DIRECTION dir) {
-	auto session = static_cast<SESSION*>(get_actor(p_id));
-	auto& x = session->x;
-	auto& y = session->y;
+	auto actor = get_actor(p_id);
+	auto& x = actor->x;
+	auto& y = actor->y;
 	auto prevX = x;
 	auto prevY = y;
 	switch (dir){
@@ -782,35 +775,35 @@ void do_move(int p_id, DIRECTION dir) {
 
 	updateSector(p_id, prevX, prevY, x, y);
 
-	session->m_vl.lock();
-	auto view_set_size = session->m_view_set.size();
-	session->m_old_view_list.resize(view_set_size);
+	actor->m_vl.lock();
+	auto view_set_size = actor->m_view_set.size();
+	actor->m_old_view_list.resize(view_set_size);
 	if(view_set_size > 0){
-		std::copy(session->m_view_set.begin(), session->m_view_set.end(), session->m_old_view_list.begin());
+		std::copy(actor->m_view_set.begin(), actor->m_view_set.end(), actor->m_old_view_list.begin());
 	}
-	auto& m_old_view_list = session->m_old_view_list;
-	session->m_vl.unlock();
+	auto& m_old_view_list = actor->m_old_view_list;
+	actor->m_vl.unlock();
 	auto&& new_vl = get_id_from_overlapped_sector(p_id);
 
 	for (auto pl : new_vl){
 		if (m_old_view_list.end() == std::find(m_old_view_list.begin(), m_old_view_list.end(), pl)){
 			//1. 새로 시야에 들어오는 플레이어
-			session->m_vl.lock();
-			session->m_view_set.insert(pl);
-			session->m_vl.unlock();
+			actor->m_vl.lock();
+			actor->m_view_set.insert(pl);
+			actor->m_vl.unlock();
 			send_add_object(p_id, pl);
 
 			if (false == is_npc(pl)){
-				auto session2 = static_cast<SESSION*>(get_actor(p_id));
-				session2->m_vl.lock();
-				if (0 == session2->m_view_set.count(p_id)){
-					session2->m_view_set.insert(p_id);
-					session2->m_vl.unlock();
+				auto actor2 = get_actor(p_id);
+				actor2->m_vl.lock();
+				if (0 == actor2->m_view_set.count(p_id)){
+					actor2->m_view_set.insert(p_id);
+					actor2->m_vl.unlock();
 					send_add_object(pl, p_id);
 					//cout << "시야추가1: " << pl << ", " << p_id << endl;
 				}
 				else{
-					session2->m_vl.unlock();
+					actor2->m_vl.unlock();
 					send_move_packet(pl, p_id);
 				}
 			}
@@ -821,16 +814,16 @@ void do_move(int p_id, DIRECTION dir) {
 		else{
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
 			if (false == is_npc(pl)){
-				auto session2 = static_cast<SESSION*>(get_actor(p_id));
-				session2->m_vl.lock();
-				if (0 == session2->m_view_set.count(p_id)){
-					session2->m_view_set.insert(p_id);
-					session2->m_vl.unlock();
+				auto actor2 = get_actor(p_id);
+				actor2->m_vl.lock();
+				if (0 == actor2->m_view_set.count(p_id)){
+					actor2->m_view_set.insert(p_id);
+					actor2->m_vl.unlock();
 					send_add_object(pl, p_id);
 					//cout << "시야추가2: " << pl << ", " << p_id << endl;
 				}
 				else{
-					session2->m_vl.unlock();
+					actor2->m_vl.unlock();
 					send_move_packet(p_id, pl);
 				}
 			}
@@ -839,22 +832,22 @@ void do_move(int p_id, DIRECTION dir) {
 	for (auto pl : m_old_view_list){
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), pl)){
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			session->m_vl.lock();
-			session->m_view_set.erase(pl);
-			session->m_vl.unlock();
+			actor->m_vl.lock();
+			actor->m_view_set.erase(pl);
+			actor->m_vl.unlock();
 			send_remove_object(p_id, pl);
 			//cout << "시야에서 사라짐: " << pl << endl;
 
 			if (false == is_npc(pl)){
-				auto session2 = static_cast<SESSION*>(get_actor(p_id));
-				session2->m_vl.lock();
-				if (0 != session2->m_view_set.count(p_id)){
-					session2->m_view_set.erase(p_id);
-					session2->m_vl.unlock();
+				auto actor2 = get_actor(p_id);
+				actor2->m_vl.lock();
+				if (0 != actor2->m_view_set.count(p_id)){
+					actor2->m_view_set.erase(p_id);
+					actor2->m_vl.unlock();
 					send_remove_object(pl, p_id);
 				}
 				else{
-					session2->m_vl.unlock();
+					actor2->m_vl.unlock();
 				}
 			}
 		}
@@ -869,21 +862,22 @@ void do_timer() {
 			TIMER_EVENT ev = timer_queue.top();
 			timer_queue.pop();
 			timer_l.unlock();
-			if(timer_dequeue_objects.count(ev.object) != 0){
-				continue;
-			}
 			if(ev.e_type == OP_DELAY_SEND && 
-				!players[ev.object - 1].sendExOverManager.hasSendData()){
+				!actors[ev.object].session->sendExOverManager.hasSendData()){
 				continue;
 			}
 			if(is_npc(ev.object)){
+				//cout << "timer queue id: " << ev.object << " is active: "<< actors[ev.object].is_active << endl;
+				if (!actors[ev.object].is_active) {
+					continue;
+				}
 				auto over = &get_actor(ev.object)->npcOver;
 				over->m_op = ev.e_type;
 				memset(&over->m_over, 0, sizeof(over->m_over));
 
 				PostQueuedCompletionStatus(h_iocp, 1, ev.object, &over->m_over);
 			}else{
-				auto over = &static_cast<SESSION*>(get_actor(ev.object))->sendExOverManager.get();
+				auto over = &get_actor(ev.object)->session->sendExOverManager.get();
 				over->m_op = ev.e_type;
 				PostQueuedCompletionStatus(h_iocp, 1, ev.object, &over->m_over);
 			}
@@ -896,20 +890,24 @@ void do_timer() {
 
 
 int main() {
-	for (int i = 0; i < MAX_PLAYER; ++i) {
-		auto& pl = players[i];
-		pl.id = i+1;
-		pl.m_state = PLST_FREE;
+	for (int i = SERVER_ID+1; i <= MAX_PLAYER; ++i) {
+		auto& pl = actors[i];
+		pl.id = i;
+		pl.session = new SESSION;
+		pl.session->m_state = PLST_FREE;
+		pl.is_active = true;
 	}
-	for (int i = 0; i < MAX_NPC; i++) {
-		auto& npc = npcs[i];
-		npc.id = i + NPC_START + 1;
+	for (int i = MAX_PLAYER+1; i < MAX_USER; i++) {
+		auto& npc = actors[i];
+		npc.id = i;
 		sprintf_s(npc.m_name, "N%d", npc.id);
 		npc.x = rand() % WORLD_X_SIZE;
 		npc.y = rand() % WORLD_Y_SIZE;
+		npc.move_time = 0;
 		auto sectorViewFrustumX = npc.x / WORLD_SECTOR_SIZE;
 		auto sectorViewFrustumY = npc.y / WORLD_SECTOR_SIZE;
 		memset(&npc.npcOver.m_over, 0, sizeof(npc.npcOver.m_over));
+		npc.is_active = false;
 		world_sector[sectorViewFrustumY][sectorViewFrustumX].m_sector.insert(npc.id);
 	}
 
