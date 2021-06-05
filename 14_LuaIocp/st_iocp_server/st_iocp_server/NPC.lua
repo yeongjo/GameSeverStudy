@@ -17,7 +17,7 @@ function player_is_near(p_id)
 			API_add_event_npc_random_move(myid, 0000);
 			API_add_event_npc_random_move(myid, 1000);
 			API_add_event_npc_random_move(myid, 2000);
-			API_add_event_send_mess(myid, p_id, "BYE", 2000);
+			API_add_event_send_mess(p_id, myid, "BYE", 2000);
 		end
 	end
 end

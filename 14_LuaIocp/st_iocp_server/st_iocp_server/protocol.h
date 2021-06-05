@@ -7,6 +7,10 @@ constexpr int WORLD_X_SIZE = 4000;
 constexpr int WORLD_Y_SIZE = 4000;
 constexpr int NPC_START = 10000;
 constexpr int MAX_USER = 200000 + NPC_START;
+//constexpr int WORLD_X_SIZE = 4000;
+//constexpr int WORLD_Y_SIZE = 4000;
+//constexpr int NPC_START = 10000;
+//constexpr int MAX_USER = 10000 + NPC_START;
 
 constexpr int VIEW_RADIUS = 5;
 
