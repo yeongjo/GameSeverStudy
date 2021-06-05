@@ -6,6 +6,7 @@
 #include <array>
 #include <queue>
 #include <unordered_set>
+struct ExOverManager;
 using namespace std;
 #include <WS2tcpip.h>
 #include <MSWSock.h>
@@ -32,7 +33,6 @@ mutex coutMutex;
 #define WORLD_WIDTH WORLD_X_SIZE
 #define WORLD_HEIGHT WORLD_Y_SIZE
 #define VIEW_RADIUS 5
-
 #define MESSAGE_MAX_BUFFER MAX_NAME
 
 constexpr int32_t ceil_const(float num) {
@@ -45,36 +45,141 @@ constexpr int WORLD_SECTOR_SIZE = (VIEW_RADIUS + 2);
 constexpr int WORLD_SECTOR_X_COUNT = ceil_const(WORLD_WIDTH / (float)WORLD_SECTOR_SIZE);
 constexpr int WORLD_SECTOR_Y_COUNT = ceil_const(WORLD_HEIGHT / (float)WORLD_SECTOR_SIZE);
 
-enum OP_TYPE { OP_RECV, OP_SEND, OP_ACCEPT, OP_RANDOM_MOVE_LOOP, OP_RANDOM_MOVE, OP_ATTACK, OP_PLAYER_APPROACH, OP_SEND_MESSAGE, OP_DELAY_SEND };
+enum EOpType { OP_RECV, OP_SEND, OP_ACCEPT, OP_RANDOM_MOVE_LOOP, OP_RANDOM_MOVE, OP_ATTACK, OP_PLAYER_APPROACH, OP_SEND_MESSAGE, OP_DELAY_SEND };
+enum EPlayerState { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
-struct NPC_OVER {
+struct NpcOver {
 	WSAOVERLAPPED	m_over;
-	OP_TYPE			m_op;
+	EOpType			m_op;
 };
-struct EX_OVER : public NPC_OVER {
-	WSABUF			m_wsabuf[1];
-	unsigned char	m_packetbuf[MAX_BUFFER];
-	SOCKET			m_csocket;					// OP_ACCEPT에서만 사용
+struct ExOver : public NpcOver {
+	WSABUF			wsabuf[1];
+	unsigned char	packetBuf[MAX_BUFFER];
+	SOCKET			csocket;					// OP_ACCEPT에서만 사용
+private:
+	ExOverManager* manager;
+public:
+	ExOver() = default;
+	ExOver(ExOverManager* manager) : manager(manager) {}
+
+	void Recycle();
+	ExOverManager* GetManager() {
+		return manager;
+	}
 };
-struct TIMER_EVENT {
+
+/// <summary>
+/// Get()으로 ExOver 쓰고
+/// ExOver->Recycle() 호출하면 됨
+/// </summary>
+struct ExOverManager {
+private:
+	vector<ExOver*> managedExOvers;
+	mutex managedExOversLock;
+	vector<unsigned char> sendingData;
+	mutex sendingDataLock;
+	static size_t EX_OVER_SIZE_INCREMENT;
+
+public:
+	ExOverManager() {
+		managedExOvers.resize(2);
+		auto size = managedExOvers.size();
+		for (size_t i = 0; i < size; ++i) {
+			managedExOvers[i] = new ExOver(this);
+		}
+	}
+
+	/// <summary>
+	/// 보낼 데이터가 남아있으면 true 반환
+	/// 내부에서 lock 사용함
+	/// </summary>
+	/// <returns></returns>
+	bool HasSendData() {
+		sendingDataLock.lock();
+		if (sendingData.empty()) {
+			sendingDataLock.unlock();
+			return false;
+		}
+		sendingDataLock.unlock();
+		return true;
+	}
+
+	/// <summary>
+	/// 보낼 데이터를 큐에 쌓아둡니다.
+	/// </summary>
+	/// <param name="p"></param>
+	void AddSendingData(void* p) {
+		const unsigned char packetSize = static_cast<unsigned char*>(p)[0];
+		sendingDataLock.lock();
+		const auto prevSize = sendingData.size();
+		const auto totalSendPacketSize = prevSize + static_cast<size_t>(packetSize);
+		sendingData.resize(totalSendPacketSize);
+		memcpy(&sendingData[prevSize], p, packetSize);
+		sendingDataLock.unlock(); // TODO 패킷을 보내는데 받는쪽에서 모르는 패킷이라함
+	}
+
+	/// <summary>
+	/// 저장해둔 데이터를 모두 초기화합니다.
+	/// </summary>
+	void ClearSendingData() {
+		sendingDataLock.lock();
+		sendingData.clear();
+		sendingDataLock.unlock();
+	}
+
+	/// <summary>
+	/// 저장해둔 데이터를 send를 호출하여 id에 해당하는 플레이어에 보냅니다.
+	/// NPC에게 보내지 않게 예외처리하지 않습니다.
+	/// </summary>
+	/// <param name="p_id"></param>
+	void SendAddedData(int p_id);
+
+	ExOver& Get() {
+		ExOver* result;
+		{
+			lock_guard<mutex> lg{ managedExOversLock };
+			size_t size = managedExOvers.size();
+			if (size == 0) {
+				managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
+				for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
+					managedExOvers[i] = new ExOver(this);
+				}
+				size += EX_OVER_SIZE_INCREMENT;
+			}
+			result = managedExOvers[size - 1];
+			managedExOvers.pop_back();
+		}
+		return *result;
+	}
+
+	/// <summary>
+	/// 직접 호출하는 함수 아님 ExOver::Recycle사용할것
+	/// </summary>
+	/// <param name="usableGroup"></param>
+	void Recycle(ExOver* usableGroup) {
+		lock_guard<mutex> lg{ managedExOversLock };
+		managedExOvers.push_back(usableGroup);
+	}
+};
+size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 4;
+struct TimerEvent {
 	int object;
-	OP_TYPE e_type;
+	EOpType e_type;
 	chrono::system_clock::time_point start_time;
 	int target_id;
 	char buffer[MESSAGE_MAX_BUFFER];
 	bool hasBuffer;
 
-	constexpr bool operator< (const TIMER_EVENT& L) const {
+	constexpr bool operator< (const TimerEvent& L) const {
 		return (start_time > L.start_time);
 	}
-	constexpr bool operator== (const TIMER_EVENT& L) const {
+	constexpr bool operator== (const TimerEvent& L) const {
 		return (object == L.object);
 	}
 };
 template<typename T>
 class removable_priority_queue : public std::priority_queue<T, std::vector<T>> {
 public:
-
 	bool remove(const T& value) {
 		auto it = std::find(this->c.begin(), this->c.end(), value);
 		if (it != this->c.end()) {
@@ -95,183 +200,65 @@ public:
 	}
 };
 
-enum PL_STATE { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
+struct Session {
+	mutex  socketLock;
+	atomic<EPlayerState> state;
+	SOCKET socket;
+	ExOver recvOver;
 
-constexpr size_t SEND_EXOVER_INCREASEMENT_SIZE = 4;
+	vector<char> recvedBuf;
+	int recvedBufSize;
 
-/// <summary>
-/// get으로 EX_OVER 꺼내서 쓰고, 쓴 EX_OVER를 ExOverUsableGroup로 형변환하고 recycle 호출하면 됨
-/// </summary>
-struct SendExOverManager {
-	struct ExOverUsableGroup {
-	private:
-		EX_OVER ex_over;
-		//bool is_used = false;
-		SendExOverManager* manager;
-
-	public:
-		ExOverUsableGroup(SendExOverManager* manager) : manager(manager) {
-
-		}
-		//void setIsUsed(bool used) {
-		//	is_used = used;
-		//}
-
-		//bool getIsUsed() const {
-		//	return is_used;
-		//}
-
-		EX_OVER& getExOver() {
-			return ex_over;
-		}
-
-		void recycle() {
-			manager->recycle(this);
-		}
-
-		SendExOverManager* getSendExOverManager() const {
-			return manager;
-		}
-
-		friend SendExOverManager;
-	};
-
-private:
-	vector<ExOverUsableGroup*> m_send_over;
-	mutex m_send_over_vector_lock;
-	vector<unsigned char> m_send_data;
-	mutex m_send_data_lock;
-
-public:
-	SendExOverManager() {
-		m_send_over.resize(2);
-		auto size = m_send_over.size();
-		for (size_t i = 0; i < size; ++i) {
-			m_send_over[i] = new ExOverUsableGroup(this);
-		}
-	}
-
-	bool hasSendData() {
-		m_send_data_lock.lock();
-		if (m_send_data.empty()) {
-			m_send_data_lock.unlock();
-			return false;
-		}
-		m_send_data_lock.unlock();
-		return true;
-	}
-
-	void addSendData(void* p) {
-		unsigned char p_size = reinterpret_cast<unsigned char*>(p)[0];
-		m_send_data_lock.lock();
-
-		auto prev_size = m_send_data.size();
-		auto send_data_total_size = prev_size + static_cast<size_t>(p_size);
-		m_send_data.resize(send_data_total_size);
-		//if (prev_size > 20) {
-		//	cout << "packet size: " << +p_size << "; prev_size: " << prev_size << "; send_data_total_size: " << send_data_total_size << endl;
-		//}
-		memcpy(&m_send_data[prev_size], p, p_size);
-		m_send_data_lock.unlock();
-	}
-
-	void clearSendData() {
-		m_send_data_lock.lock();
-		m_send_data.clear();
-		m_send_data_lock.unlock();
-		//for (int i = 0; i < m_send_over.size(); ++i) {
-		//	m_send_over[i]->setIsUsed(false);
-		//}
-	}
-
-	void sendAddedData(int p_id);
-
-	EX_OVER& get() {
-		ExOverUsableGroup* send_ex_over;
-		{
-			lock_guard<mutex> lg{ m_send_over_vector_lock };
-			//return m_send_over[0].getExOver();
-			size_t size = m_send_over.size();
-			if (size == 0) {
-				m_send_over.resize(size + SEND_EXOVER_INCREASEMENT_SIZE);
-				for (size_t i = size; i < size + SEND_EXOVER_INCREASEMENT_SIZE; ++i) {
-					m_send_over[i] = new ExOverUsableGroup(this);
-				}
-				size += SEND_EXOVER_INCREASEMENT_SIZE;
-			}
-			send_ex_over = m_send_over[size - 1];
-			m_send_over.pop_back();
-		}
-		//send_ex_over->setIsUsed(true);
-		return send_ex_over->getExOver();
-	}
-
-private:
-	void recycle(ExOverUsableGroup* usableGroup) {
-		//usableGroup->setIsUsed(false);
-		lock_guard<mutex> lg{ m_send_over_vector_lock };
-		m_send_over.push_back(usableGroup);
-	}
+	ExOverManager exOverManager;
 };
 
-removable_priority_queue<TIMER_EVENT> timer_queue;
-mutex timer_l;
-HANDLE h_iocp;
-
-struct SESSION {
-	mutex  m_slock;
-	atomic<PL_STATE> m_state;
-	SOCKET m_socket;
-	EX_OVER m_recv_over;
-
-	int m_prev_size;
-
-	SendExOverManager sendExOverManager;
-};
-
-struct S_ACTOR {
+struct Actor {
 	int		id;
-	char m_name[200];
+	char name[MAX_NAME];
 	short	x, y;
-	int		move_time;
-	mutex   m_vl;
+	int		moveTime;
 
-	lua_State* L;
-	mutex   m_sl;
+	atomic_bool isActive;
+	vector<int> selectedSector;
+	vector<int> oldViewList;
+	unordered_set<int> viewSet;
+	mutex   viewSetLock;
 
-	atomic_bool is_active;
-	vector<int> m_selected_sector;
-	vector<int> m_old_view_list;
-	unordered_set<int> m_view_set;
-
-	NPC_OVER npcOver;
-	SESSION* session;
+	NpcOver* npcOver;	// Npc만 사용
+	lua_State* L;		// Npc만 사용
+	mutex luaLock;		// Npc만 사용
+	Session* session;	// 플레이어와 같은 세션 접속 유저만 사용
 };
 
-constexpr int SERVER_ID = 0;
-array <S_ACTOR, MAX_USER + 1> actors;
-void disconnect(int p_id);
-void do_npc_random_move(S_ACTOR& npc);
+struct SECTOR {
+	unordered_set<int> sector;
+	mutex sectorLock;
+};
 
-bool is_npc(int id) {
+array <array <SECTOR, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> world_sector;
+constexpr int SERVER_ID = 0;
+array <Actor, MAX_USER + 1> actors;
+removable_priority_queue<TimerEvent> timerQueue;
+mutex timerLock;
+HANDLE hIocp;
+
+void Disconnect(int playerId);
+void DoNpcRandomMove(Actor& npc);
+
+bool IsNpc(int id) {
 	return id > NPC_ID_START;
 }
 
-S_ACTOR* get_actor(int id) {
+Actor* GetActor(int id) {
 	return &actors[id];
 }
 
-struct SECTOR {
-	unordered_set<int> m_sector;
-	mutex m_sector_lock;
-};
-array <array <SECTOR, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> world_sector;
 
-void display_error(const char* msg, int err_no) {
+void display_error(const char* msg, int errNum) {
 #ifdef DISPLAYLOG
 	WCHAR* lpMsgBuf;
 	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-		NULL, err_no, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		NULL, errNum, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 		(LPTSTR)&lpMsgBuf, 0, NULL);
 	cout << msg;
 	wcout << lpMsgBuf << endl;
@@ -279,48 +266,52 @@ void display_error(const char* msg, int err_no) {
 #endif
 }
 
-void SendExOverManager::sendAddedData(int p_id) {
-	vector<unsigned char> copyed_send_data;
-	m_send_data_lock.lock();
-	if (m_send_data.empty()) {
-		m_send_data_lock.unlock();
+void ExOver::Recycle() {
+	manager->Recycle(this);
+}
+
+void ExOverManager::SendAddedData(int p_id) {
+	vector<unsigned char> copyedSendData;
+	sendingDataLock.lock();
+	if (sendingData.empty()) {
+		sendingDataLock.unlock();
 		return;
 	}
-	copyed_send_data.resize(m_send_data.size());
-	std::copy(m_send_data.begin(), m_send_data.end(), copyed_send_data.begin());
-	m_send_data.clear();
-	m_send_data_lock.unlock();
-	auto session = get_actor(p_id)->session;
-	while (!copyed_send_data.empty()) {
-		auto send_data_begin = copyed_send_data.begin();
-		auto p_size = min(MAX_BUFFER, (int)copyed_send_data.size());
-		void* p = &*send_data_begin;
-		auto s_over = &get();
-		s_over->m_op = OP_SEND;
-		memset(&s_over->m_over, 0, sizeof(s_over->m_over));
-		memcpy(s_over->m_packetbuf, p, p_size);
-		s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
-		s_over->m_wsabuf[0].len = p_size;
-		auto ret = WSASend(session->m_socket, s_over->m_wsabuf, 1, NULL, 0, &s_over->m_over, NULL);
+	copyedSendData.resize(sendingData.size());
+	std::copy(sendingData.begin(), sendingData.end(), copyedSendData.begin());
+	sendingData.clear();
+	sendingDataLock.unlock();
+	auto session = GetActor(p_id)->session;
+	while (!copyedSendData.empty()) {
+		auto sendDataBegin = copyedSendData.begin();
+		auto sendDataSize = min(MAX_BUFFER, (int)copyedSendData.size());
+		void* p = &*sendDataBegin;
+		auto exOver = &Get();
+		exOver->m_op = OP_SEND;
+		memset(&exOver->m_over, 0, sizeof(exOver->m_over));
+		memcpy(exOver->packetBuf, p, sendDataSize);
+		exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(exOver->packetBuf);
+		exOver->wsabuf[0].len = sendDataSize;
+		auto ret = WSASend(session->socket, exOver->wsabuf, 1, NULL, 0, &exOver->m_over, NULL);
 		if (0 != ret) {
-			auto err_no = WSAGetLastError();
-			if (WSA_IO_PENDING != err_no) {
+			auto err = WSAGetLastError();
+			if (WSA_IO_PENDING != err) {
 				display_error("WSASend : ", WSAGetLastError());
-				disconnect(p_id);
+				Disconnect(p_id);
 				return;
 			}
 		} else {
-			copyed_send_data.erase(send_data_begin, send_data_begin + p_size);
+			copyedSendData.erase(sendDataBegin, sendDataBegin + sendDataSize);
 		}
 	}
 }
 
-void add_event(int obj, OP_TYPE ev_t, int delay_ms, const char* buffer = nullptr, int target_id = -1) {
+void add_event(int obj, EOpType type, int delayMs, const char* buffer = nullptr, int target_id = -1) {
 	using namespace chrono;
-	TIMER_EVENT ev;
-	ev.e_type = ev_t;
+	TimerEvent ev;
+	ev.e_type = type;
 	ev.object = obj;
-	ev.start_time = system_clock::now() + milliseconds(delay_ms);
+	ev.start_time = system_clock::now() + milliseconds(delayMs);
 	ev.target_id = target_id;
 	if (nullptr != buffer) {
 		memcpy(ev.buffer, buffer, sizeof(char) * strlen(buffer)+1);
@@ -328,43 +319,24 @@ void add_event(int obj, OP_TYPE ev_t, int delay_ms, const char* buffer = nullptr
 	} else {
 		ev.hasBuffer = false;
 	}
-	timer_l.lock();
-	timer_queue.push(ev);
-	timer_l.unlock();
+	timerLock.lock();
+	timerQueue.push(ev);
+	timerLock.unlock();
 }
 
-void send_packet(int p_id, void* p) {
-	add_event(p_id, OP_DELAY_SEND, 12);
-	actors[p_id].session->sendExOverManager.addSendData(p);
-	//int p_size = reinterpret_cast<unsigned char*>(p)[0];
-	//int p_type = reinterpret_cast<unsigned char*>(p)[1];
-	//cout << "To client [" << p_id << "] : ";
-	//cout << "Packet [" << p_type << "]\n";
-	/*EX_OVER* s_over = &players[p_id].sendExOverManager.get();
-	s_over->m_op = OP_SEND;
-	memset(&s_over->m_over, 0, sizeof(s_over->m_over));
-	memcpy(s_over->m_packetbuf, p, p_size);
-	s_over->m_wsabuf[0].buf = reinterpret_cast<CHAR*>(s_over->m_packetbuf);
-	s_over->m_wsabuf[0].len = p_size;
-	int ret = WSASend(players[p_id].m_socket, s_over->m_wsabuf, 1,
-		NULL, 0, &s_over->m_over, 0);
-	if (0 != ret) {
-		int err_no = WSAGetLastError();
-		if (WSA_IO_PENDING != err_no) {
-			display_error("WSASend : ", WSAGetLastError());
-			disconnect(p_id);
-		}
-	}*/
+void AddSendingData(int targetId, void* buf) {
+	add_event(targetId, OP_DELAY_SEND, 12);
+	actors[targetId].session->exOverManager.AddSendingData(buf);
 }
 
-void do_recv(int key) {
-	actors[key].session->m_recv_over.m_wsabuf[0].buf =
-		reinterpret_cast<char*>(actors[key].session->m_recv_over.m_packetbuf)
-		+ actors[key].session->m_prev_size;
-	actors[key].session->m_recv_over.m_wsabuf[0].len = MAX_BUFFER - actors[key].session->m_prev_size;
-	memset(&actors[key].session->m_recv_over.m_over, 0, sizeof(actors[key].session->m_recv_over.m_over));
+void CallRecv(int key) {
+	actors[key].session->recvOver.wsabuf[0].buf =
+		reinterpret_cast<char*>(actors[key].session->recvOver.packetBuf)
+		+ actors[key].session->recvedBufSize;
+	actors[key].session->recvOver.wsabuf[0].len = MAX_BUFFER - actors[key].session->recvedBufSize;
+	memset(&actors[key].session->recvOver.m_over, 0, sizeof(actors[key].session->recvOver.m_over));
 	DWORD r_flag = 0;
-	int ret = WSARecv(actors[key].session->m_socket, actors[key].session->m_recv_over.m_wsabuf, 1, NULL, &r_flag, &actors[key].session->m_recv_over.m_over, NULL);
+	int ret = WSARecv(actors[key].session->socket, actors[key].session->recvOver.wsabuf, 1, NULL, &r_flag, &actors[key].session->recvOver.m_over, NULL);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no)
@@ -372,40 +344,40 @@ void do_recv(int key) {
 	}
 }
 
-int get_new_player_id(SOCKET p_socket) {
+int GetNewPlayerId(SOCKET socket) {
 	for (int i = 1; i <= MAX_PLAYER; ++i) {
-		if (PLST_FREE == actors[i].session->m_state) {
-			lock_guard<mutex> lg{ actors[i].session->m_slock };
-			actors[i].session->m_state = PLST_CONNECTED;
-			actors[i].session->m_socket = p_socket;
-			actors[i].m_name[0] = 0;
-			return i; // SERVER_ID 때문에 +1된거 넘김
+		if (PLST_FREE == actors[i].session->state) {
+			actors[i].session->state = PLST_CONNECTED;
+			lock_guard<mutex> lg{ actors[i].session->socketLock };
+			actors[i].session->socket = socket;
+			actors[i].name[0] = 0;
+			return i;
 		}
 	}
 	return -1;
 }
 
-void send_login_ok_packet(int p_id) {
+void send_login_ok_packet(int targetId) {
 	s2c_login_ok p;
 	p.hp = 10;
-	p.id = p_id;
+	p.id = targetId;
 	p.level = 2;
 	p.race = 1;
 	p.size = sizeof(p);
 	p.type = S2C_LOGIN_OK;
-	auto actor = get_actor(p_id);
+	auto actor = GetActor(targetId);
 	p.x = actor->x;
 	p.y = actor->y;
-	send_packet(p_id, &p);
+	AddSendingData(targetId, &p);
 }
 
-void send_chat(int c_id, int p_id, const char* mess) {
+void send_chat(int receiverId, int senderId, const char* mess) {
 	s2c_chat p;
-	p.id = p_id;
+	p.id = senderId;
 	p.size = sizeof(p);
 	p.type = S2C_CHAT;
 	strcpy_s(p.mess, mess);
-	send_packet(c_id, &p);
+	AddSendingData(receiverId, &p);
 }
 
 void send_move_packet(int c_id, int p_id) {
@@ -413,11 +385,11 @@ void send_move_packet(int c_id, int p_id) {
 	p.id = p_id;
 	p.size = sizeof(p);
 	p.type = S2C_MOVE_PLAYER;
-	auto actor = get_actor(p_id);
+	auto actor = GetActor(p_id);
 	p.x = actor->x;
 	p.y = actor->y;
-	p.move_time = actor->move_time;
-	send_packet(c_id, &p);
+	p.move_time = actor->moveTime;
+	AddSendingData(c_id, &p);
 }
 
 void send_add_object(int targetId, int addedId) {
@@ -425,29 +397,29 @@ void send_add_object(int targetId, int addedId) {
 	p.id = addedId;
 	p.size = sizeof(p);
 	p.type = S2C_ADD_PLAYER;
-	auto actor = get_actor(addedId);
+	auto actor = GetActor(addedId);
 	p.x = actor->x;
 	p.y = actor->y;
 	p.race = 0;
-	strcpy_s(p.name, actor->m_name);
-	send_packet(targetId, &p);
+	strcpy_s(p.name, actor->name);
+	AddSendingData(targetId, &p);
 }
 
-void send_remove_object(int c_id, int p_id) {
+void send_remove_object(int receiverId, int removeTargetId) {
 	s2c_remove_player p;
-	p.id = p_id;
+	p.id = removeTargetId;
 	p.size = sizeof(p);
 	p.type = S2C_REMOVE_PLAYER;
-	send_packet(c_id, &p);
+	AddSendingData(receiverId, &p);
 }
 
-bool can_see(int id_a, int id_b) {
-	auto actor_a = get_actor(id_a);
-	auto actor_b = get_actor(id_b);
-	int ax = actor_a->x;
-	int ay = actor_a->y;
-	int bx = actor_b->x;
-	int by = actor_b->y;
+bool CanSee(int id1, int id2) {
+	auto actor1 = GetActor(id1);
+	auto actor2 = GetActor(id2);
+	int ax = actor1->x;
+	int ay = actor1->y;
+	int bx = actor2->x;
+	int by = actor2->y;
 	return VIEW_RADIUS >=
 		abs(ax - bx) + abs(ay - by);
 }
@@ -455,21 +427,21 @@ bool can_see(int id_a, int id_b) {
 /// p_id를 가진 플레이어를 제외하고 해당 좌표 섹터에 있는 플레이어를 main_sector에 추가합니다.
 /// </summary>
 /// <param name="y"></param>
-/// <param name="p_id"></param>
+/// <param name="id"></param>
 /// <param name="x"></param>
-/// <param name="main_sector"></param>
-void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int>& main_sector) {
-	lock_guard<mutex> lock(world_sector[y][x].m_sector_lock);
-	auto& other_set = world_sector[y][x].m_sector;
-	auto isNpc = is_npc(p_id);
-	for (auto other_id : other_set) {
-		auto otherIsNpc = is_npc(other_id);
+/// <param name="returnSector"></param>
+void AddSectorPlayersToMainSector(int id, int y, int x, vector<int>& returnSector) {
+	lock_guard<mutex> lock(world_sector[y][x].sectorLock);
+	auto& otherSet = world_sector[y][x].sector;
+	auto isNpc = IsNpc(id);
+	for (auto otherId : otherSet) {
+		auto otherIsNpc = IsNpc(otherId);
 		if ((isNpc && otherIsNpc) || // p_id가 NPC면 NPC는 필요없다. 사람만 인식한다
-			other_id == p_id || // 내 id는 몰라도 된다
-			!can_see(p_id, other_id)) { // 안보이는건 필요없다.
+			otherId == id || // 내 id는 몰라도 된다
+			!CanSee(id, otherId)) { // 안보이는건 필요없다.
 			continue;
 		}
-		main_sector.push_back(other_id);
+		returnSector.push_back(otherId);
 	}
 }
 
@@ -479,281 +451,289 @@ void add_sector_players_to_main_sector(int p_id, int y, int x, vector<int>& main
 /// </summary>
 /// <param name="p_id"></param>
 /// <returns></returns>
-vector<int>& get_id_from_overlapped_sector(int p_id) {
-	auto actor = get_actor(p_id);
-	auto amINpc = is_npc(p_id);
+vector<int>& GetIdFromOverlappedSector(int p_id) {
+	auto actor = GetActor(p_id);
+	auto amINpc = IsNpc(p_id);
 	int y = actor->y;
 	int x = actor->x;
-	auto sector_y = y / WORLD_SECTOR_SIZE;
-	auto sector_x = x / WORLD_SECTOR_SIZE;
-	auto& main_sector = world_sector[sector_y][sector_x];
+	auto sectorY = y / WORLD_SECTOR_SIZE;
+	auto sectorX = x / WORLD_SECTOR_SIZE;
+	auto& mainSector = world_sector[sectorY][sectorX];
 
-	auto& selected_sector = actor->m_selected_sector;
-	selected_sector.clear();
-	main_sector.m_sector_lock.lock();
-	for (auto id : main_sector.m_sector) {
-		if ((!amINpc || (amINpc && !is_npc(id))) && 
+	auto& returnSector = actor->selectedSector;
+	returnSector.clear();
+	mainSector.sectorLock.lock();
+	for (auto id : mainSector.sector) {
+		if ((!amINpc || (amINpc && !IsNpc(id))) && 
 			id != p_id && 
-			can_see(id, p_id)) {
-			selected_sector.push_back(id);
+			CanSee(id, p_id)) {
+			returnSector.push_back(id);
 		}
 	}
-	main_sector.m_sector_lock.unlock();
+	mainSector.sectorLock.unlock();
 
-	auto sector_view_frustum_top = (y - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sector_view_frustum_bottom = (y + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sector_view_frustum_left = (x - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sector_view_frustum_right = (x + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	if (sector_view_frustum_top != sector_y && 0 < sector_y) {
-		add_sector_players_to_main_sector(p_id, sector_view_frustum_top, sector_x, selected_sector);
-		if (sector_view_frustum_left != sector_x && 0 < sector_x) {
-			add_sector_players_to_main_sector(p_id, sector_view_frustum_top, sector_view_frustum_left, selected_sector);
-		} else if (sector_view_frustum_right != sector_x && sector_x < static_cast<int>(world_sector[
-			sector_view_frustum_top].size() - 1)) {
-			add_sector_players_to_main_sector(p_id, sector_view_frustum_top, sector_view_frustum_right,
-				selected_sector);
+	auto sectorViewFrustumTop = (y - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumBottom = (y + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumLeft = (x - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumRight = (x + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	if (sectorViewFrustumTop != sectorY && 0 < sectorY) {
+		AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorX, returnSector);
+		if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+			AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorViewFrustumLeft, returnSector);
+		} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[
+			sectorViewFrustumTop].size() - 1)) {
+			AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorViewFrustumRight,
+				returnSector);
 		}
-	} else if (sector_view_frustum_bottom != sector_y && sector_y < static_cast<int>(world_sector.size() - 1)) {
-		add_sector_players_to_main_sector(p_id, sector_view_frustum_bottom, sector_x, selected_sector);
-		if (sector_view_frustum_left != sector_x && 0 < sector_x) {
-			add_sector_players_to_main_sector(p_id, sector_view_frustum_bottom, sector_view_frustum_left,
-				selected_sector);
-		} else if (sector_view_frustum_right != sector_x && sector_x < static_cast<int>(world_sector[
-			sector_view_frustum_bottom].size() - 1)) {
-			add_sector_players_to_main_sector(p_id, sector_view_frustum_bottom, sector_view_frustum_right,
-				selected_sector);
+	} else if (sectorViewFrustumBottom != sectorY && sectorY < static_cast<int>(world_sector.size() - 1)) {
+		AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorX, returnSector);
+		if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+			AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorViewFrustumLeft,
+				returnSector);
+		} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[
+			sectorViewFrustumBottom].size() - 1)) {
+			AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorViewFrustumRight,
+				returnSector);
 		}
 	}
-	if (sector_view_frustum_left != sector_x && 0 < sector_x) {
-		add_sector_players_to_main_sector(p_id, sector_y, sector_view_frustum_left, selected_sector);
-	} else if (sector_view_frustum_right != sector_x && sector_x < static_cast<int>(world_sector[sector_y].size() - 1)) {
-		add_sector_players_to_main_sector(p_id, sector_y, sector_view_frustum_right, selected_sector);
+	if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+		AddSectorPlayersToMainSector(p_id, sectorY, sectorViewFrustumLeft, returnSector);
+	} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[sectorY].size() - 1)) {
+		AddSectorPlayersToMainSector(p_id, sectorY, sectorViewFrustumRight, returnSector);
 	}
-	return selected_sector;
+	return returnSector;
 }
 
-void wake_up_npc(int id) {
-	auto actor = get_actor(id);
-	if (actor->is_active == false) {
+void WakeUpNpc(int id) {
+	auto actor = GetActor(id);
+	if (actor->isActive == false) {
 		bool old_state = false;
-		if (true == atomic_compare_exchange_strong(&actor->is_active, &old_state, true)) {
-			//cout << "wake up id: " << id << " is active: "<< actor->is_active << endl;
+		if (true == atomic_compare_exchange_strong(&actor->isActive, &old_state, true)) {
+			//cout << "wake up id: " << id << " is active: "<< actor->isActive << endl;
 			add_event(id, OP_RANDOM_MOVE_LOOP, 1000);
 		}
 	}
 }
 
-void sleep_npc(int id) {
-	auto actor = get_actor(id);
-	actor->is_active = false;
-	TIMER_EVENT timerEvent;
+void SleepNpc(int id) {
+	auto actor = GetActor(id);
+	actor->isActive = false;
+	TimerEvent timerEvent;
 	timerEvent.object = id;
-	lock_guard<mutex> lock(timer_l);
-	timer_queue.remove_all(timerEvent);
+	lock_guard<mutex> lock(timerLock);
+	timerQueue.remove_all(timerEvent);
 	//cout << "sleep id: " << id << endl;
 }
 
-void do_move(int p_id, DIRECTION dir);
+void MovePlayer(int playerId, DIRECTION dir);
 
-
-void process_packet(int p_id, unsigned char* p_buf) {
-	switch (p_buf[1]) {
+/// <summary>
+/// 한 스레드에서만 호출안되기때문에 lock 안걸어도됨
+/// </summary>
+/// <param name="id"></param>
+void ProcessPacket(int playerId, unsigned char* buf) {
+	switch (buf[1]) {
 	case C2S_LOGIN: {
-		c2s_login* packet = reinterpret_cast<c2s_login*>(p_buf);
-		auto logined_actor = get_actor(p_id);
-		logined_actor->session->m_state = PLST_INGAME;
+		c2s_login* packet = reinterpret_cast<c2s_login*>(buf);
+		auto logined_actor = GetActor(playerId);
+		logined_actor->session->state = PLST_INGAME;
 		{
-			lock_guard <mutex> gl1{ logined_actor->session->m_slock };
-			strcpy_s(logined_actor->m_name, packet->name);
-			//session->x = 1;
-			//session->y = 1;
+			// 위치 이름 초기화
+			lock_guard <mutex> lock{ logined_actor->session->socketLock };
+			strcpy_s(logined_actor->name, packet->name);
+			//session->x = 1; session->y = 1;
 			logined_actor->x = rand() % WORLD_X_SIZE;
 			logined_actor->y = rand() % WORLD_Y_SIZE;
 		}
 		{
+			// 섹터에 추가
 			auto& sector = world_sector[logined_actor->y / WORLD_SECTOR_SIZE][logined_actor->x / WORLD_SECTOR_SIZE];
-			lock_guard <mutex> gl2{ sector.m_sector_lock };
-			sector.m_sector.insert(p_id);
+			lock_guard <mutex> lock{ sector.sectorLock };
+			sector.sector.insert(playerId);
 		}
-		send_login_ok_packet(p_id);
+		send_login_ok_packet(playerId);
 
-		auto& selected_sector = get_id_from_overlapped_sector(p_id);
+		auto& selected_sector = GetIdFromOverlappedSector(playerId);
 
-		logined_actor->m_vl.lock();
+		logined_actor->viewSetLock.lock();
 		for (auto id : selected_sector) {
-			logined_actor->m_view_set.insert(id);
+			logined_actor->viewSet.insert(id);
 		}
-		logined_actor->m_vl.unlock();
+		logined_actor->viewSetLock.unlock();
 		for (auto id : selected_sector) {
-			auto other = get_actor(id);
-			other->m_vl.lock();
-			other->m_view_set.insert(p_id);
-			other->m_vl.unlock();
-			send_add_object(p_id, id);
-			if (!is_npc(id)) {
-				send_add_object(id, p_id);
+			auto other = GetActor(id);
+			other->viewSetLock.lock();
+			other->viewSet.insert(playerId);
+			other->viewSetLock.unlock();
+			send_add_object(playerId, id);
+			if (!IsNpc(id)) {
+				send_add_object(id, playerId);
 			} else {
-				wake_up_npc(other->id);
+				WakeUpNpc(other->id);
 			}
 		}
 		break;
 	}
 	case C2S_MOVE: {
-		c2s_move* packet = reinterpret_cast<c2s_move*>(p_buf);
-		auto actor = get_actor(p_id);
-		actor->move_time = packet->move_time;
-		do_move(p_id, packet->dr);
+		c2s_move* packet = reinterpret_cast<c2s_move*>(buf);
+		auto actor = GetActor(playerId);
+		actor->moveTime = packet->move_time;
+		MovePlayer(playerId, packet->dr);
 		break;
 	}
 	default: {
-		cout << "Unknown Packet Type from Client[" << p_id;
-		cout << "] Packet Type [" << p_buf[1] << "]";
+		cout << "Unknown Packet Type from Client[" << playerId;
+		cout << "] Packet Type [" << buf[1] << "]";
 		while (true);
 	}
 	}
 }
 
-void disconnect(int p_id) {
-	auto actor = get_actor(p_id);
+void Disconnect(int playerId) {
+	auto actor = GetActor(playerId);
 	auto session = actor->session;
-	if (session->m_state == PLST_FREE) {
+	if (session->state == PLST_FREE) {
 		return;
 	}
-	closesocket(session->m_socket);
-	session->m_state = PLST_FREE;
+	closesocket(session->socket);
+	session->state = PLST_FREE;
 
 	// remove from sector
-	session->sendExOverManager.clearSendData();
+	session->exOverManager.ClearSendingData();
 	int y = actor->y;
 	int x = actor->x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
 	auto sector_x = x / WORLD_SECTOR_SIZE;
-	for (int y = -1; y <= 1; ++y) {
+	auto& main_sector = world_sector[sector_y][sector_x];
+	main_sector.sectorLock.lock();
+	main_sector.sector.erase(playerId);
+	main_sector.sectorLock.unlock();
+	/*for (int y = -1; y <= 1; ++y) {
 		for (int x = -1; x <= 1; ++x) {
-			if (sector_y + y < 0 || world_sector.size() <= sector_y + y ||
-				sector_x + x < 0 || world_sector[sector_y + y].size() <= sector_x + x)
+			auto offsetY = sector_y + y;
+			auto offsetX = sector_x + x;
+			if (offsetY < 0 || world_sector.size() <= offsetY ||
+				offsetX < 0 || world_sector[offsetY].size() <= offsetX)
 				continue;
-			auto& main_sector = world_sector[sector_y + y][sector_x + x];
-			main_sector.m_sector_lock.lock();
-			main_sector.m_sector.erase(p_id);
-			main_sector.m_sector_lock.unlock();
+			auto& main_sector = world_sector[offsetY][offsetX];
+			main_sector.sectorLock.lock();
+			main_sector.sector.erase(playerId);
+			main_sector.sectorLock.unlock();
 		}
-	}
+	}*/
 	//
 
-	actor->m_vl.lock();
-	actor->m_old_view_list.resize(actor->m_view_set.size());
-	std::copy(actor->m_view_set.begin(), actor->m_view_set.end(), actor->m_old_view_list.begin());
-	actor->m_view_set.clear();
-	actor->m_vl.unlock();
-	auto& m_old_view_list = actor->m_old_view_list;
+	actor->viewSetLock.lock();
+	actor->oldViewList.resize(actor->viewSet.size());
+	std::copy(actor->viewSet.begin(), actor->viewSet.end(), actor->oldViewList.begin());
+	actor->viewSet.clear();
+	actor->viewSetLock.unlock();
+	auto& m_old_view_list = actor->oldViewList;
 	for (auto pl : m_old_view_list) {
-		if (is_npc(pl)) {
-			lock_guard<mutex> lock(get_actor(pl)->m_vl);
-			get_actor(pl)->m_view_set.erase(actor->id);
+		if (IsNpc(pl)) {
+			lock_guard<mutex> lock(GetActor(pl)->viewSetLock);
+			GetActor(pl)->viewSet.erase(actor->id);
 			continue;
 		}
-		auto actor2 = get_actor(p_id);
-		if (PLST_INGAME == actor2->session->m_state) {
-			lock_guard<mutex> lock(actor2->m_vl);
-			actor2->m_view_set.erase(actor->id);
-			send_remove_object(actor2->id, p_id);
+		auto actor2 = GetActor(playerId);
+		if (PLST_INGAME == actor2->session->state) {
+			send_remove_object(actor2->id, playerId);
+			lock_guard<mutex> lock(actor2->viewSetLock);
+			actor2->viewSet.erase(actor->id);
 		}
 	}
 }
 
 void worker(HANDLE h_iocp, SOCKET l_socket) {
 	while (true) {
-		DWORD num_bytes;
-		ULONG_PTR ikey;
-		WSAOVERLAPPED* over;
+		DWORD recvBufSize;
+		ULONG_PTR recvKey;
+		WSAOVERLAPPED* recvOver;
 
-		BOOL ret = GetQueuedCompletionStatus(h_iocp, &num_bytes,
-			&ikey, &over, INFINITE);
+		BOOL ret = GetQueuedCompletionStatus(h_iocp, &recvBufSize,
+			&recvKey, &recvOver, INFINITE);
 
-		int key = static_cast<int>(ikey);
+		int key = static_cast<int>(recvKey);
 		if (FALSE == ret) {
 			if (SERVER_ID == key) {
 				display_error("GQCS : ", WSAGetLastError());
 				exit(-1);
-			} else {
-				display_error("GQCS : ", WSAGetLastError());
-				disconnect(key);
 			}
+			display_error("GQCS : ", WSAGetLastError());
+			Disconnect(key);
 		}
-		if ((key != SERVER_ID) && (0 == num_bytes)) {
-			disconnect(key);
+		if ((key != SERVER_ID) && (0 == recvBufSize)) {
+			Disconnect(key);
 			continue;
 		}
-		EX_OVER* ex_over = reinterpret_cast<EX_OVER*>(over);
+		ExOver* exOver = reinterpret_cast<ExOver*>(recvOver);
 
-		switch (ex_over->m_op) {
+		switch (exOver->m_op) {
 		case OP_RECV: {
-			unsigned char* packet_ptr = ex_over->m_packetbuf;
-			auto session = get_actor(key)->session;
-			int num_data = num_bytes + session->m_prev_size;
-			int packet_size = packet_ptr[0];
+			unsigned char* recvPacketPtr = exOver->packetBuf;
+			auto session = GetActor(key)->session;
+			int totalRecvBufSize = recvBufSize + session->recvedBufSize;
 
-			while (num_data >= packet_size) {
-				process_packet(key, packet_ptr);
-				num_data -= packet_size;
-				packet_ptr += packet_size;
-				if (0 >= num_data) break;
-				packet_size = packet_ptr[0];
+			for (int recvPacketSize = recvPacketPtr[0];
+				recvPacketSize <= totalRecvBufSize; ) {// 또는 받은 데이터가 없음
+				ProcessPacket(key, recvPacketPtr);
+				totalRecvBufSize -= recvPacketSize;
+				recvPacketPtr += recvPacketSize;
+				if (totalRecvBufSize == 0)
+					break;
+				recvPacketSize = recvPacketPtr[0];
 			}
-			session->m_prev_size = num_data;
-			if (0 != num_data)
-				memcpy(ex_over->m_packetbuf, packet_ptr, num_data);
-			do_recv(key);
+			session->recvedBufSize = totalRecvBufSize;
+			if (0 < totalRecvBufSize)
+				memcpy(exOver->packetBuf, recvPacketPtr, totalRecvBufSize);
+			CallRecv(key);
 			break;
 		}
 		case OP_SEND: {
-			auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over);
-			usableGroup->recycle();
+			exOver->Recycle();
 			break;
 		}
 		case OP_ACCEPT: {
-			int c_id = get_new_player_id(ex_over->m_csocket);
-			auto session = get_actor(c_id)->session;
+			int c_id = GetNewPlayerId(exOver->csocket);
+			auto session = GetActor(c_id)->session;
 			if (-1 != c_id) {
-				session->m_recv_over.m_op = OP_RECV;
-				session->m_prev_size = 0;
+				session->recvOver.m_op = OP_RECV;
+				session->recvedBufSize = 0;
 				CreateIoCompletionPort(
-					reinterpret_cast<HANDLE>(session->m_socket), h_iocp, c_id, 0);
-				do_recv(c_id);
+					reinterpret_cast<HANDLE>(session->socket), h_iocp, c_id, 0);
+				CallRecv(c_id);
 			} else {
-				closesocket(session->m_socket);
+				closesocket(session->socket);
 				cout << "인원 수 꽉참" << endl;
 			}
 
-			memset(&ex_over->m_over, 0, sizeof(ex_over->m_over));
+			memset(&exOver->m_over, 0, sizeof(exOver->m_over));
 			SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-			ex_over->m_csocket = c_socket;
+			exOver->csocket = c_socket;
 			AcceptEx(l_socket, c_socket,
-				ex_over->m_packetbuf, 0, 32, 32, NULL, &ex_over->m_over);
+				exOver->packetBuf, 0, 32, 32, NULL, &exOver->m_over);
 			break;
 		}
 		case OP_RANDOM_MOVE_LOOP: {
 			add_event(key, OP_RANDOM_MOVE_LOOP, 1000);
 		}
 		case OP_RANDOM_MOVE: {
-			do_npc_random_move(actors[key]);
+			DoNpcRandomMove(actors[key]);
 			break;
 		}
 		case OP_ATTACK: {
-			reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over)->recycle();
+			exOver->Recycle();
 			break;
 		}
 		case OP_DELAY_SEND: {
 			// TODO 플레이어 키 상대로만 호출돼야함
-			auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over);
-			usableGroup->getSendExOverManager()->sendAddedData(key);
-			usableGroup->recycle();
+			exOver->GetManager()->SendAddedData(key);
+			exOver->Recycle();
 			break;
 		}
 		case OP_PLAYER_APPROACH: {
-			actors[key].m_sl.lock();
-			int moved_player = *reinterpret_cast<int*>(ex_over->m_packetbuf);
+			actors[key].luaLock.lock();
+			int moved_player = *reinterpret_cast<int*>(exOver->packetBuf);
 			lua_State* L = actors[key].L;
 			lua_getglobal(L, "player_is_near");
 			lua_pushnumber(L, moved_player);
@@ -761,41 +741,40 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			if (0 != res) {
 				cout << "LUA error in exec: " << lua_tostring(L, -1) << endl;
 			}
-			actors[key].m_sl.unlock();
-			auto usableGroup = reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over);
-			usableGroup->recycle();
+			actors[key].luaLock.unlock();
+			exOver->Recycle();
 			break;
 		}
 		case OP_SEND_MESSAGE: {
-			int c_id = *reinterpret_cast<int*>(ex_over->m_packetbuf);
-			char* mess = reinterpret_cast<char*>(ex_over->m_packetbuf + sizeof(int));
+			int c_id = *reinterpret_cast<int*>(exOver->packetBuf);
+			char* mess = reinterpret_cast<char*>(exOver->packetBuf + sizeof(int));
 			send_chat(key, c_id, mess);
-			reinterpret_cast<SendExOverManager::ExOverUsableGroup*>(ex_over)->recycle();
+			exOver->Recycle();
 			break;
 		}
 		}
 	}
 }
 
-void updateSector(int p_id, int prevX, int prevY, int x, int y) {
-	auto sector_view_frustum_x = prevX / WORLD_SECTOR_SIZE;
-	auto sector_view_frustum_y = prevY / WORLD_SECTOR_SIZE;
-	auto new_sector_view_frustum_x = x / WORLD_SECTOR_SIZE;
-	auto new_sector_view_frustum_y = y / WORLD_SECTOR_SIZE;
+void UpdateSector(int actorId, int prevX, int prevY, int x, int y) {
+	const auto sectorViewFrustumX = prevX / WORLD_SECTOR_SIZE;
+	const auto sectorViewFrustumY = prevY / WORLD_SECTOR_SIZE;
+	const auto newSectorViewFrustumX = x / WORLD_SECTOR_SIZE;
+	const auto newSectorViewFrustumY = y / WORLD_SECTOR_SIZE;
 	if (y != prevY || x != prevX) {
 		// 원래 섹터랑 다르면 다른 섹터로 이동한 것임
 		{
-			lock_guard<mutex> gl2{ world_sector[sector_view_frustum_y][sector_view_frustum_x].m_sector_lock };
-			world_sector[sector_view_frustum_y][sector_view_frustum_x].m_sector.erase(p_id);
+			lock_guard<mutex> gl2{ world_sector[sectorViewFrustumY][sectorViewFrustumX].sectorLock };
+			world_sector[sectorViewFrustumY][sectorViewFrustumX].sector.erase(actorId);
 		}
 		{
-			lock_guard<mutex> gl2{ world_sector[new_sector_view_frustum_y][new_sector_view_frustum_x].m_sector_lock };
-			world_sector[new_sector_view_frustum_y][new_sector_view_frustum_x].m_sector.insert(p_id);
+			lock_guard<mutex> gl2{ world_sector[newSectorViewFrustumY][newSectorViewFrustumX].sectorLock };
+			world_sector[newSectorViewFrustumY][newSectorViewFrustumX].sector.insert(actorId);
 		}
 	}
 }
 
-void do_npc_random_move(S_ACTOR& npc) {
+void DoNpcRandomMove(Actor& npc) {
 	auto& x = npc.x;
 	auto& y = npc.y;
 	auto prevX = x;
@@ -806,15 +785,15 @@ void do_npc_random_move(S_ACTOR& npc) {
 	case 2: if (y < WORLD_Y_SIZE - 1) ++y; break;
 	case 3: if (y > 0) --y; break;
 	}
-	updateSector(npc.id, prevX, prevY, x, y);
+	UpdateSector(npc.id, prevX, prevY, x, y);
 
-	npc.m_vl.lock();
-	npc.m_old_view_list.resize(npc.m_view_set.size());
-	std::copy(npc.m_view_set.begin(), npc.m_view_set.end(), npc.m_old_view_list.begin());
-	auto& oldViewList = npc.m_old_view_list;
-	npc.m_vl.unlock();
+	npc.viewSetLock.lock();
+	npc.oldViewList.resize(npc.viewSet.size());
+	std::copy(npc.viewSet.begin(), npc.viewSet.end(), npc.oldViewList.begin());
+	auto& oldViews = npc.oldViewList;
+	npc.viewSetLock.unlock();
 
-	auto&& new_vl = get_id_from_overlapped_sector(npc.id);
+	auto&& newViews = GetIdFromOverlappedSector(npc.id);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{coutMutex};
 	cout << "npc[" << npc.id << "] (" << npc.x << "," << npc.y << ") 이동 " << oldViewList.size() << "명[";
@@ -828,65 +807,65 @@ void do_npc_random_move(S_ACTOR& npc) {
 	cout << "]한테 보임";
 #endif // NPCLOG
 
-	if (new_vl.empty()) {
-		sleep_npc(npc.id); // 아무도 보이지 않으므로 취침
+	if (newViews.empty()) {
+		SleepNpc(npc.id); // 아무도 보이지 않으므로 취침
 #ifdef NPCLOG
 			cout << " & 아무에게도 안보여서 취침" << endl;
 #endif
-		for (auto pl : oldViewList) {
-			auto actor = get_actor(pl);
-			actor->m_vl.lock();
-			if(0 != actor->m_view_set.count(npc.id)){
-				actor->m_view_set.erase(npc.id);
-				actor->m_vl.unlock();
-				send_remove_object(pl, npc.id);
+		for (auto otherId : oldViews) {
+			auto actor = GetActor(otherId);
+			actor->viewSetLock.lock();
+			if(0 != actor->viewSet.count(npc.id)){
+				actor->viewSet.erase(npc.id);
+				actor->viewSetLock.unlock();
+				send_remove_object(otherId, npc.id);
 			}else{
-				actor->m_vl.unlock();
+				actor->viewSetLock.unlock();
 			}
 		}
 		return;
 	}
-	for (auto pl : new_vl) {
-		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), pl)) {
+	for (auto otherId : newViews) {
+		if (oldViews.end() == std::find(oldViews.begin(), oldViews.end(), otherId)) {
 			// 플레이어의 시야에 등장
-			auto actor = get_actor(pl);
-			npc.m_vl.lock();
-			npc.m_view_set.insert(pl);
-			npc.m_vl.unlock();
+			auto actor = GetActor(otherId);
+			npc.viewSetLock.lock();
+			npc.viewSet.insert(otherId);
+			npc.viewSetLock.unlock();
 #ifdef NPCLOG
 				cout << " &[" << pl << "]에게 등장";
 #endif
-			actor->m_vl.lock();
-			if(0 == actor->m_view_set.count(pl)){
-				send_add_object(pl, npc.id);
-				actor->m_view_set.insert(npc.id);
+			actor->viewSetLock.lock();
+			if(0 == actor->viewSet.count(otherId)){
+				send_add_object(otherId, npc.id);
+				actor->viewSet.insert(npc.id);
 			}
-			actor->m_vl.unlock();
+			actor->viewSetLock.unlock();
 		} else {
 			// 플레이어가 계속 보고있음.
 #ifdef NPCLOG
 				cout << " &[" << pl << "]에게 위치 갱신";
 #endif
 
-			send_move_packet(pl, npc.id);
+			send_move_packet(otherId, npc.id);
 		}
 	}
-	for (auto pl : oldViewList) {
-		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), pl)) {
-			auto actor = get_actor(pl);
-			npc.m_vl.lock();
-			npc.m_view_set.erase(pl);
-			npc.m_vl.unlock();
+	for (auto otherId : oldViews) {
+		if (newViews.end() == std::find(newViews.begin(), newViews.end(), otherId)) {
+			auto actor = GetActor(otherId);
+			npc.viewSetLock.lock();
+			npc.viewSet.erase(otherId);
+			npc.viewSetLock.unlock();
 #ifdef NPCLOG
 				cout << " &[" << pl << "]에게서 사라짐";
 #endif
-			actor->m_vl.lock();
-			if (actor->m_view_set.count(pl) != 0) {
-				actor->m_view_set.erase(pl);
-				actor->m_vl.unlock();
-				send_remove_object(pl, npc.id);
+			actor->viewSetLock.lock();
+			if (actor->viewSet.count(otherId) != 0) {
+				actor->viewSet.erase(otherId);
+				actor->viewSetLock.unlock();
+				send_remove_object(otherId, npc.id);
 			} else {
-				actor->m_vl.unlock();
+				actor->viewSetLock.unlock();
 			}
 		}
 	}
@@ -895,8 +874,8 @@ void do_npc_random_move(S_ACTOR& npc) {
 #endif
 }
 
-void do_move(int p_id, DIRECTION dir) {
-	auto actor = get_actor(p_id);
+void MovePlayer(int playerId, DIRECTION dir) {
+	auto actor = GetActor(playerId);
 	auto& x = actor->x;
 	auto& y = actor->y;
 	auto prevX = x;
@@ -907,119 +886,119 @@ void do_move(int p_id, DIRECTION dir) {
 	case D_W: if (x > 0) x--; break;
 	case D_E: if (x < (WORLD_X_SIZE - 1)) x++; break;
 	}
-	send_move_packet(p_id, p_id);
+	send_move_packet(playerId, playerId);
 
-	updateSector(p_id, prevX, prevY, x, y);
+	UpdateSector(playerId, prevX, prevY, x, y);
 
-	actor->m_vl.lock();
-	auto view_set_size = actor->m_view_set.size();
-	actor->m_old_view_list.resize(view_set_size);
+	actor->viewSetLock.lock();
+	auto view_set_size = actor->viewSet.size();
+	actor->oldViewList.resize(view_set_size);
 	if (view_set_size > 0) {
-		std::copy(actor->m_view_set.begin(), actor->m_view_set.end(), actor->m_old_view_list.begin());
+		std::copy(actor->viewSet.begin(), actor->viewSet.end(), actor->oldViewList.begin());
 	}
-	auto& m_old_view_list = actor->m_old_view_list;
-	actor->m_vl.unlock();
-	auto&& new_vl = get_id_from_overlapped_sector(p_id);
+	auto& m_old_view_list = actor->oldViewList;
+	actor->viewSetLock.unlock();
+	auto&& new_vl = GetIdFromOverlappedSector(playerId);
 
 	for (auto pl : new_vl) {
 		if (m_old_view_list.end() == std::find(m_old_view_list.begin(), m_old_view_list.end(), pl)) {
 			//1. 새로 시야에 들어오는 플레이어
-			actor->m_vl.lock();
-			actor->m_view_set.insert(pl);
-			actor->m_vl.unlock();
-			send_add_object(p_id, pl);
+			actor->viewSetLock.lock();
+			actor->viewSet.insert(pl);
+			actor->viewSetLock.unlock();
+			send_add_object(playerId, pl);
 
-			auto other_actor = get_actor(pl);
-			if (false == is_npc(pl)) {
-				other_actor->m_vl.lock();
-				if (0 == other_actor->m_view_set.count(p_id)) {
-					other_actor->m_view_set.insert(p_id);
-					other_actor->m_vl.unlock();
-					send_add_object(pl, p_id);
+			auto other_actor = GetActor(pl);
+			if (false == IsNpc(pl)) {
+				other_actor->viewSetLock.lock();
+				if (0 == other_actor->viewSet.count(playerId)) {
+					other_actor->viewSet.insert(playerId);
+					other_actor->viewSetLock.unlock();
+					send_add_object(pl, playerId);
 #ifdef PLAYERLOG
 					{
 						lock_guard<mutex> coutLock{coutMutex};
-						cout << "시야추가1: " << pl << "," << p_id << endl;
+						cout << "시야추가1: " << pl << "," << playerId << endl;
 					}
 #endif
 				} else {
-					other_actor->m_vl.unlock();
-					send_move_packet(pl, p_id);
+					other_actor->viewSetLock.unlock();
+					send_move_packet(pl, playerId);
 				}
 			} else {
-				wake_up_npc(pl);
+				WakeUpNpc(pl);
 #ifdef PLAYERLOG
 				{
 					lock_guard<mutex> coutLock{coutMutex};
-					cout << "플레이어[" << p_id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 등장 그리고 깨움" << endl;
+					cout << "플레이어[" << playerId << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 등장 그리고 깨움" << endl;
 				}
 #endif
-				lock_guard<mutex> lock(other_actor->m_vl);
-				other_actor->m_view_set.insert(p_id);
+				lock_guard<mutex> lock(other_actor->viewSetLock);
+				other_actor->viewSet.insert(playerId);
 			}
 		} else {
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
-			if (false == is_npc(pl)) {
-				auto other_actor = get_actor(pl);
-				other_actor->m_vl.lock();
-				if (0 == other_actor->m_view_set.count(p_id)) {
-					other_actor->m_view_set.insert(p_id);
-					other_actor->m_vl.unlock();
-					send_add_object(pl, p_id);
+			if (false == IsNpc(pl)) {
+				auto other_actor = GetActor(pl);
+				other_actor->viewSetLock.lock();
+				if (0 == other_actor->viewSet.count(playerId)) {
+					other_actor->viewSet.insert(playerId);
+					other_actor->viewSetLock.unlock();
+					send_add_object(pl, playerId);
 #ifdef PLAYERLOG
 					{
 						lock_guard<mutex> coutLock{coutMutex};
-						cout << "시야추가2 [이게 왜불려]: " << pl << "," << p_id << endl;
+						cout << "시야추가2 [이게 왜불려]: " << pl << "," << playerId << endl;
 					}
 #endif
 				} else {
-					other_actor->m_vl.unlock();
-					send_move_packet(p_id, pl);
+					other_actor->viewSetLock.unlock();
+					send_move_packet(playerId, pl);
 				}
 			} else {
 				// NPC라면 OP_PLAYER_APPROACH 호출
 #ifdef PLAYERLOG
 				{
 					lock_guard<mutex> coutLock{coutMutex};
-					cout << "플레이어[" << p_id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 갱신" << endl;
+					cout << "플레이어[" << playerId << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 갱신" << endl;
 				}
 #endif
-				auto ex_over = &actor->session->sendExOverManager.get();
+				auto ex_over = &actor->session->exOverManager.Get();
 				ex_over->m_op = OP_PLAYER_APPROACH;
-				*reinterpret_cast<int*>(ex_over->m_packetbuf) = p_id;
-				PostQueuedCompletionStatus(h_iocp, 1, pl, &ex_over->m_over);
+				*reinterpret_cast<int*>(ex_over->packetBuf) = playerId;
+				PostQueuedCompletionStatus(hIocp, 1, pl, &ex_over->m_over);
 			}
 		}
 	}
 	for (auto pl : m_old_view_list) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), pl)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			actor->m_vl.lock();
-			actor->m_view_set.erase(pl);
-			actor->m_vl.unlock();
-			send_remove_object(p_id, pl);
+			actor->viewSetLock.lock();
+			actor->viewSet.erase(pl);
+			actor->viewSetLock.unlock();
+			send_remove_object(playerId, pl);
 			//cout << "시야에서 사라짐: " << pl << endl;
 
-			auto other_actor = get_actor(pl);
-			if (false == is_npc(pl)) {
-				other_actor->m_vl.lock();
-				if (0 != other_actor->m_view_set.count(p_id)) {
-					other_actor->m_view_set.erase(p_id);
-					other_actor->m_vl.unlock();
-					send_remove_object(pl, p_id);
+			auto other_actor = GetActor(pl);
+			if (false == IsNpc(pl)) {
+				other_actor->viewSetLock.lock();
+				if (0 != other_actor->viewSet.count(playerId)) {
+					other_actor->viewSet.erase(playerId);
+					other_actor->viewSetLock.unlock();
+					send_remove_object(pl, playerId);
 				} else {
-					other_actor->m_vl.unlock();
+					other_actor->viewSetLock.unlock();
 				}
 			} else {
 				// NPC 시야에서도 지우기
 #ifdef PLAYERLOG
 				{
 					lock_guard<mutex> coutLock{coutMutex};
-					cout << "플레이어[" << p_id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 사라짐" << endl;
+					cout << "플레이어[" << playerId << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 사라짐" << endl;
 				}
 #endif
-				lock_guard<mutex> lock(other_actor->m_vl );
-				other_actor->m_view_set.erase(p_id);
+				lock_guard<mutex> lock(other_actor->viewSetLock );
+				other_actor->viewSet.erase(playerId);
 			}
 		}
 	}
@@ -1076,39 +1055,38 @@ int API_add_event_send_mess(lua_State* L) {
 void do_timer() {
 	using namespace chrono;
 	for (;;) {
-		timer_l.lock();
-		if (false == timer_queue.empty() && timer_queue.top().start_time < system_clock::now()) {
-			TIMER_EVENT ev = timer_queue.top();
-			timer_queue.pop();
-			timer_l.unlock();
+		timerLock.lock();
+		if (false == timerQueue.empty() && timerQueue.top().start_time < system_clock::now()) {
+			TimerEvent ev = timerQueue.top();
+			timerQueue.pop();
+			timerLock.unlock();
 			if (ev.e_type == OP_DELAY_SEND &&
-				!actors[ev.object].session->sendExOverManager.hasSendData()) {
+				!actors[ev.object].session->exOverManager.HasSendData()) {
 				continue;
 			}
 
-			if (is_npc(ev.object)) {
-				//cout << "timer queue id: " << ev.object << " is active: "<< actors[ev.object].is_active << endl;
-				if (!actors[ev.object].is_active) {
+			if (IsNpc(ev.object)) {
+				if (!actors[ev.object].isActive) {
 					continue;
 				}
-				auto over = &get_actor(ev.object)->npcOver;
+				auto over = GetActor(ev.object)->npcOver;
 				over->m_op = ev.e_type;
 				memset(&over->m_over, 0, sizeof(over->m_over));
 
-				PostQueuedCompletionStatus(h_iocp, 1, ev.object, &over->m_over);
+				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->m_over);
 			} else {
-				auto over = &get_actor(ev.object)->session->sendExOverManager.get();
+				auto over = &GetActor(ev.object)->session->exOverManager.Get();
 				over->m_op = ev.e_type;
-				memcpy(over->m_packetbuf, &ev.target_id, sizeof(ev.target_id));
+				memcpy(over->packetBuf, &ev.target_id, sizeof(ev.target_id));
 				if (ev.hasBuffer) {
-					memcpy(over->m_packetbuf + sizeof(ev.target_id),
+					memcpy(over->packetBuf + sizeof(ev.target_id),
 						ev.buffer, 
-						min(sizeof(ev.buffer), sizeof(over->m_packetbuf) - sizeof(ev.target_id)));
+						min(sizeof(ev.buffer), sizeof(over->packetBuf) - sizeof(ev.target_id)));
 				}
-				PostQueuedCompletionStatus(h_iocp, 1, ev.object, &over->m_over);
+				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->m_over);
 			}
 		} else {
-			timer_l.unlock();
+			timerLock.unlock();
 			this_thread::sleep_for(10ms);
 		}
 	}
@@ -1119,22 +1097,23 @@ int main() {
 	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
 		auto& pl = actors[i];
 		pl.id = i;
-		pl.session = new SESSION;
-		pl.session->m_state = PLST_FREE;
-		pl.is_active = true;
+		pl.session = new Session;
+		pl.session->state = PLST_FREE;
+		pl.isActive = true;
 	}
 	for (int i = MAX_PLAYER + 1; i <= MAX_USER; i++) {
 		auto& npc = actors[i];
 		npc.id = i;
-		sprintf_s(npc.m_name, "N%d", npc.id);
+		sprintf_s(npc.name, "N%d", npc.id);
 		npc.x = rand() % WORLD_X_SIZE;
 		npc.y = rand() % WORLD_Y_SIZE;
-		npc.move_time = 0;
+		npc.moveTime = 0;
 		auto sectorViewFrustumX = npc.x / WORLD_SECTOR_SIZE;
 		auto sectorViewFrustumY = npc.y / WORLD_SECTOR_SIZE;
-		memset(&npc.npcOver.m_over, 0, sizeof(npc.npcOver.m_over));
-		npc.is_active = false;
-		world_sector[sectorViewFrustumY][sectorViewFrustumX].m_sector.insert(npc.id);
+		npc.npcOver = new NpcOver;
+		memset(&npc.npcOver->m_over, 0, sizeof(npc.npcOver->m_over));
+		npc.isActive = false;
+		world_sector[sectorViewFrustumY][sectorViewFrustumX].sector.insert(npc.id);
 		lua_State* L = npc.L = luaL_newstate();
 		luaL_openlibs(L);
 		luaL_loadfile(L, "npc.lua");
@@ -1158,9 +1137,9 @@ int main() {
 	WSAStartup(MAKEWORD(2, 2), &WSAData);
 
 	wcout.imbue(locale("korean"));
-	h_iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
+	hIocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
 	SOCKET listenSocket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-	CreateIoCompletionPort(reinterpret_cast<HANDLE>(listenSocket), h_iocp, SERVER_ID, 0);
+	CreateIoCompletionPort(reinterpret_cast<HANDLE>(listenSocket), hIocp, SERVER_ID, 0);
 	SOCKADDR_IN serverAddr;
 	memset(&serverAddr, 0, sizeof(SOCKADDR_IN));
 	serverAddr.sin_family = AF_INET;
@@ -1169,13 +1148,13 @@ int main() {
 	::bind(listenSocket, (struct sockaddr*)&serverAddr, sizeof(SOCKADDR_IN));
 	listen(listenSocket, SOMAXCONN);
 
-	EX_OVER accept_over;
+	ExOver accept_over;
 	accept_over.m_op = OP_ACCEPT;
 	memset(&accept_over.m_over, 0, sizeof(accept_over.m_over));
 	SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-	accept_over.m_csocket = c_socket;
+	accept_over.csocket = c_socket;
 	BOOL ret = AcceptEx(listenSocket, c_socket,
-		accept_over.m_packetbuf, 0, 32, 32, NULL, &accept_over.m_over);
+		accept_over.packetBuf, 0, 32, 32, NULL, &accept_over.m_over);
 	if (FALSE == ret) {
 		int err_num = WSAGetLastError();
 		if (err_num != WSA_IO_PENDING)
@@ -1187,7 +1166,7 @@ int main() {
 	thread timer_thread(do_timer);
 	vector <thread> worker_threads;
 	for (int i = 0; i < 4; ++i)
-		worker_threads.emplace_back(worker, h_iocp, listenSocket);
+		worker_threads.emplace_back(worker, hIocp, listenSocket);
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);
