@@ -3,14 +3,14 @@
 constexpr int MAX_NAME = 100;
 constexpr int MAX_BUFFER = 256;
 constexpr short SERVER_PORT = 3500;
-//constexpr int WORLD_X_SIZE = 4000;
-//constexpr int WORLD_Y_SIZE = 4000;
-//constexpr int NPC_START = 10000;
-//constexpr int MAX_USER = 200000 + NPC_START;
-constexpr int WORLD_X_SIZE = 1000;
-constexpr int WORLD_Y_SIZE = 1000;
-constexpr int NPC_START = 1000;
-constexpr int MAX_USER = 5000 + NPC_START;
+constexpr int WORLD_X_SIZE = 4000;
+constexpr int WORLD_Y_SIZE = 4000;
+constexpr int NPC_START = 10000;
+constexpr int MAX_USER = 200000 + NPC_START;
+//constexpr int WORLD_X_SIZE = 1000;
+//constexpr int WORLD_Y_SIZE = 1000;
+//constexpr int NPC_START = 1000;
+//constexpr int MAX_USER = 5000 + NPC_START;
 
 constexpr int VIEW_RADIUS = 5;
 
