@@ -76,21 +76,30 @@ public:
 /// ExOver->Recycle() »£√‚«œ∏È µ 
 /// </summary>
 struct ExOverManager {
+#define INITAL_MANAGED_EXOVER_COUNT 3
 private:
 	vector<ExOver*> managedExOvers;
 	mutex managedExOversLock;
 	vector<unsigned char> sendingData;
 	mutex sendingDataLock;
+	vector<vector<unsigned char>*> sendingDataQueue;
+	mutex sendingDataQueueLock;
 	static size_t EX_OVER_SIZE_INCREMENT;
 
 public:
-	ExOverManager() {
-		managedExOvers.resize(2);
-		auto size = managedExOvers.size();
+	ExOverManager() : managedExOvers(INITAL_MANAGED_EXOVER_COUNT){
+		auto size = INITAL_MANAGED_EXOVER_COUNT;
 		for (size_t i = 0; i < size; ++i) {
 			managedExOvers[i] = new ExOver(this);
 			managedExOvers[i]->InitOver();
 		}
+	}
+
+	virtual ~ExOverManager() {
+		for(auto queue : sendingDataQueue){
+			delete queue;
+		}
+		sendingDataQueue.clear();
 	}
 
 	/// <summary>
@@ -165,6 +174,23 @@ public:
 		memset(&usableGroup->over, 0, sizeof(usableGroup->over));
 		lock_guard<mutex> lg{ managedExOversLock };
 		managedExOvers.push_back(usableGroup);
+	}
+
+private:
+	vector<unsigned char>* GetSendingDataQueue() {
+		lock_guard<mutex> lock(sendingDataQueueLock);
+		auto size = sendingDataQueue.size();
+		if(0 < size){
+			auto& result = sendingDataQueue[size - 1];
+			sendingDataQueue.pop_back();
+			return result;
+		}
+		return new vector<unsigned char>();
+	}
+
+	void RecycleSendingDataQueue(vector<unsigned char>* recycleQueue) {
+		lock_guard<mutex> lock(sendingDataQueueLock);
+		sendingDataQueue.push_back(recycleQueue);
 	}
 };
 size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 4;
@@ -304,13 +330,15 @@ void ExOverManager::SendAddedData(int playerId) {
 		sendingDataLock.unlock();
 		return;
 	}
-	unsigned char* copedSendData = new unsigned char[totalSendDataSize];
-	memcpy(copedSendData, &sendingData[0], totalSendDataSize);
+
+	auto& copiedSendingData = *GetSendingDataQueue();
+	copiedSendingData.resize(totalSendDataSize);
+	memcpy(&copiedSendingData[0], &sendingData[0], totalSendDataSize);
 	sendingData.clear();
 	sendingDataLock.unlock();
 	
-	auto session = GetActor(playerId)->session;
-	auto sendDataBegin = copedSendData;
+	auto& session = GetActor(playerId)->session;
+	auto sendDataBegin = &copiedSendingData[0];
 	while (0 < totalSendDataSize) {
 		auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
 		auto exOver = &Get();
@@ -329,9 +357,8 @@ void ExOverManager::SendAddedData(int playerId) {
 		}
 		totalSendDataSize -= sendDataSize;
 		sendDataBegin += sendDataSize;
-		//copyedSendData.erase(sendDataBegin, sendDataBegin + sendDataSize);
 	}
-	delete[] copedSendData;
+	RecycleSendingDataQueue(&copiedSendingData);
 }
 
 void AddEvent(int obj, EOpType type, int delayMs, const char* buffer = nullptr, int targetId = -1) {
