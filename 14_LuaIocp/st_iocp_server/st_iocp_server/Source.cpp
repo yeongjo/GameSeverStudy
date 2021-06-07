@@ -15,7 +15,7 @@ extern "C" {
 #include "lauxlib.h"
 #include "lualib.h"
 }
-//#define DISPLAYLOG
+#define DISPLAYLOG
 //#define PLAYERLOG
 //#define NPCLOG
 mutex coutMutex;
@@ -49,8 +49,8 @@ enum EOpType { OP_RECV, OP_SEND, OP_ACCEPT, OP_RANDOM_MOVE_LOOP, OP_RANDOM_MOVE,
 enum EPlayerState { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
 struct NpcOver {
-	WSAOVERLAPPED	m_over;
-	EOpType			m_op;
+	WSAOVERLAPPED	over; // 클래스 생성자에서 초기화하니 값이 원래대로 돌아온다??
+	EOpType			op;
 };
 struct ExOver : public NpcOver {
 	WSABUF			wsabuf[1];
@@ -59,8 +59,11 @@ struct ExOver : public NpcOver {
 private:
 	ExOverManager* manager;
 public:
-	ExOver() = default;
+	ExOver() {}
 	ExOver(ExOverManager* manager) : manager(manager) {}
+	void InitOver() {
+		memset(&over, 0, sizeof(over));
+	}
 
 	void Recycle();
 	ExOverManager* GetManager() {
@@ -86,6 +89,7 @@ public:
 		auto size = managedExOvers.size();
 		for (size_t i = 0; i < size; ++i) {
 			managedExOvers[i] = new ExOver(this);
+			managedExOvers[i]->InitOver();
 		}
 	}
 
@@ -109,13 +113,13 @@ public:
 	/// </summary>
 	/// <param name="p"></param>
 	void AddSendingData(void* p) {
-		const unsigned char packetSize = static_cast<unsigned char*>(p)[0];
+		const auto packetSize = static_cast<size_t>(static_cast<unsigned char*>(p)[0]);
 		sendingDataLock.lock();
 		const auto prevSize = sendingData.size();
-		const auto totalSendPacketSize = prevSize + static_cast<size_t>(packetSize);
+		const auto totalSendPacketSize = prevSize + packetSize;
 		sendingData.resize(totalSendPacketSize);
 		memcpy(&sendingData[prevSize], p, packetSize);
-		sendingDataLock.unlock(); // TODO 패킷을 보내는데 받는쪽에서 모르는 패킷이라함
+		sendingDataLock.unlock(); // TODO 리펙토링이후 패킷을 보내는데 받는쪽에서 모르는 패킷이라함
 	}
 
 	/// <summary>
@@ -131,8 +135,8 @@ public:
 	/// 저장해둔 데이터를 send를 호출하여 id에 해당하는 플레이어에 보냅니다.
 	/// NPC에게 보내지 않게 예외처리하지 않습니다.
 	/// </summary>
-	/// <param name="p_id"></param>
-	void SendAddedData(int p_id);
+	/// <param name="playerId"></param>
+	void SendAddedData(int playerId);
 
 	ExOver& Get() {
 		ExOver* result;
@@ -143,11 +147,12 @@ public:
 				managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
 				for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
 					managedExOvers[i] = new ExOver(this);
+					managedExOvers[i]->InitOver();
 				}
 				size += EX_OVER_SIZE_INCREMENT;
 			}
 			result = managedExOvers[size - 1];
-			managedExOvers.pop_back();
+			managedExOvers.pop_back(); // 팝안하는 방식으로 최적화 가능
 		}
 		return *result;
 	}
@@ -157,6 +162,7 @@ public:
 	/// </summary>
 	/// <param name="usableGroup"></param>
 	void Recycle(ExOver* usableGroup) {
+		memset(&usableGroup->over, 0, sizeof(usableGroup->over));
 		lock_guard<mutex> lg{ managedExOversLock };
 		managedExOvers.push_back(usableGroup);
 	}
@@ -164,14 +170,14 @@ public:
 size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 4;
 struct TimerEvent {
 	int object;
-	EOpType e_type;
-	chrono::system_clock::time_point start_time;
-	int target_id;
+	EOpType eventType;
+	chrono::system_clock::time_point startTime;
+	int targetId;
 	char buffer[MESSAGE_MAX_BUFFER];
 	bool hasBuffer;
 
 	constexpr bool operator< (const TimerEvent& L) const {
-		return (start_time > L.start_time);
+		return (startTime > L.startTime);
 	}
 	constexpr bool operator== (const TimerEvent& L) const {
 		return (object == L.object);
@@ -199,6 +205,22 @@ public:
 		}
 	}
 };
+class TimerQueue : public removable_priority_queue<TimerEvent> {
+public:
+	void remove_all(const TimerEvent& value) {
+		auto size = this->c.size();
+		auto object = value.object;
+		for (size_t i = 0; i < size;) {
+			if(this->c[i].object == object){
+				auto begin = this->c.begin();
+				this->c.erase(begin+i);
+				--size;
+				continue;
+			}
+			++i;
+		}
+	}
+};
 
 struct Session {
 	mutex  socketLock;
@@ -206,8 +228,9 @@ struct Session {
 	SOCKET socket;
 	ExOver recvOver;
 
-	vector<char> recvedBuf;
-	int recvedBufSize;
+	vector<unsigned char> recvedBuf; // 패킷 한개보다 작은 사이즈가 들어감
+	atomic<unsigned char> recvedBufSize;
+	mutex recvedBufLock;
 
 	ExOverManager exOverManager;
 };
@@ -220,7 +243,11 @@ struct Actor {
 
 	atomic_bool isActive;
 	vector<int> selectedSector;
+	mutex   selectedSectorLock;
+	
 	vector<int> oldViewList;
+	vector<int> newViewList;
+	mutex oldNewViewListLock;
 	unordered_set<int> viewSet;
 	mutex   viewSetLock;
 
@@ -238,7 +265,7 @@ struct SECTOR {
 array <array <SECTOR, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> world_sector;
 constexpr int SERVER_ID = 0;
 array <Actor, MAX_USER + 1> actors;
-removable_priority_queue<TimerEvent> timerQueue;
+TimerQueue timerQueue;
 mutex timerLock;
 HANDLE hIocp;
 
@@ -270,51 +297,52 @@ void ExOver::Recycle() {
 	manager->Recycle(this);
 }
 
-void ExOverManager::SendAddedData(int p_id) {
-	vector<unsigned char> copyedSendData;
+void ExOverManager::SendAddedData(int playerId) {
 	sendingDataLock.lock();
-	if (sendingData.empty()) {
+	auto totalSendDataSize = sendingData.size();
+	if (totalSendDataSize == 0) {
 		sendingDataLock.unlock();
 		return;
 	}
-	copyedSendData.resize(sendingData.size());
-	std::copy(sendingData.begin(), sendingData.end(), copyedSendData.begin());
+	unsigned char* copedSendData = new unsigned char[totalSendDataSize];
+	memcpy(copedSendData, &sendingData[0], totalSendDataSize);
 	sendingData.clear();
 	sendingDataLock.unlock();
-	auto session = GetActor(p_id)->session;
-	while (!copyedSendData.empty()) {
-		auto sendDataBegin = copyedSendData.begin();
-		auto sendDataSize = min(MAX_BUFFER, (int)copyedSendData.size());
-		void* p = &*sendDataBegin;
+	
+	auto session = GetActor(playerId)->session;
+	auto sendDataBegin = copedSendData;
+	while (0 < totalSendDataSize) {
+		auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
 		auto exOver = &Get();
-		exOver->m_op = OP_SEND;
-		memset(&exOver->m_over, 0, sizeof(exOver->m_over));
-		memcpy(exOver->packetBuf, p, sendDataSize);
+		exOver->op = OP_SEND;
+		memcpy(exOver->packetBuf, sendDataBegin, sendDataSize);
 		exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(exOver->packetBuf);
 		exOver->wsabuf[0].len = sendDataSize;
-		auto ret = WSASend(session->socket, exOver->wsabuf, 1, NULL, 0, &exOver->m_over, NULL);
+		auto ret = WSASend(session->socket, exOver->wsabuf, 1, NULL, 0, &exOver->over, NULL); // TODO GetQueuedCompletionStatus에서 얼마 보냈는지 확인해서 안갔으면 더 보내기
 		if (0 != ret) {
 			auto err = WSAGetLastError();
 			if (WSA_IO_PENDING != err) {
 				display_error("WSASend : ", WSAGetLastError());
-				Disconnect(p_id);
+				Disconnect(playerId);
 				return;
 			}
-		} else {
-			copyedSendData.erase(sendDataBegin, sendDataBegin + sendDataSize);
 		}
+		totalSendDataSize -= sendDataSize;
+		sendDataBegin += sendDataSize;
+		//copyedSendData.erase(sendDataBegin, sendDataBegin + sendDataSize);
 	}
+	delete[] copedSendData;
 }
 
-void add_event(int obj, EOpType type, int delayMs, const char* buffer = nullptr, int target_id = -1) {
+void AddEvent(int obj, EOpType type, int delayMs, const char* buffer = nullptr, int targetId = -1) {
 	using namespace chrono;
 	TimerEvent ev;
-	ev.e_type = type;
+	ev.eventType = type;
 	ev.object = obj;
-	ev.start_time = system_clock::now() + milliseconds(delayMs);
-	ev.target_id = target_id;
+	ev.startTime = system_clock::now() + milliseconds(delayMs);
+	ev.targetId = targetId;
 	if (nullptr != buffer) {
-		memcpy(ev.buffer, buffer, sizeof(char) * strlen(buffer)+1);
+		memcpy(ev.buffer, buffer, sizeof(char) * (strlen(buffer)+1));
 		ev.hasBuffer = true;
 	} else {
 		ev.hasBuffer = false;
@@ -325,18 +353,19 @@ void add_event(int obj, EOpType type, int delayMs, const char* buffer = nullptr,
 }
 
 void AddSendingData(int targetId, void* buf) {
-	add_event(targetId, OP_DELAY_SEND, 12);
+	AddEvent(targetId, OP_DELAY_SEND, 12);
 	actors[targetId].session->exOverManager.AddSendingData(buf);
 }
 
 void CallRecv(int key) {
-	actors[key].session->recvOver.wsabuf[0].buf =
-		reinterpret_cast<char*>(actors[key].session->recvOver.packetBuf)
-		+ actors[key].session->recvedBufSize;
-	actors[key].session->recvOver.wsabuf[0].len = MAX_BUFFER - actors[key].session->recvedBufSize;
-	memset(&actors[key].session->recvOver.m_over, 0, sizeof(actors[key].session->recvOver.m_over));
+	auto& session = actors[key].session;
+	auto& recvOver = session->recvOver;
+	recvOver.wsabuf[0].buf =
+		reinterpret_cast<char*>(recvOver.packetBuf);
+	recvOver.wsabuf[0].len = MAX_BUFFER;
+	memset(&recvOver.over, 0, sizeof(recvOver.over));
 	DWORD r_flag = 0;
-	int ret = WSARecv(actors[key].session->socket, actors[key].session->recvOver.wsabuf, 1, NULL, &r_flag, &actors[key].session->recvOver.m_over, NULL);
+	int ret = WSARecv(session->socket, recvOver.wsabuf, 1, NULL, &r_flag, &recvOver.over, NULL);
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no)
@@ -461,6 +490,7 @@ vector<int>& GetIdFromOverlappedSector(int p_id) {
 	auto& mainSector = world_sector[sectorY][sectorX];
 
 	auto& returnSector = actor->selectedSector;
+	lock_guard<mutex> lock(actor->selectedSectorLock);
 	returnSector.clear();
 	mainSector.sectorLock.lock();
 	for (auto id : mainSector.sector) {
@@ -510,7 +540,7 @@ void WakeUpNpc(int id) {
 		bool old_state = false;
 		if (true == atomic_compare_exchange_strong(&actor->isActive, &old_state, true)) {
 			//cout << "wake up id: " << id << " is active: "<< actor->isActive << endl;
-			add_event(id, OP_RANDOM_MOVE_LOOP, 1000);
+			AddEvent(id, OP_RANDOM_MOVE_LOOP, 1000);
 		}
 	}
 }
@@ -583,7 +613,7 @@ void ProcessPacket(int playerId, unsigned char* buf) {
 	}
 	default: {
 		cout << "Unknown Packet Type from Client[" << playerId;
-		cout << "] Packet Type [" << buf[1] << "]";
+		cout << "] Packet Type [" << +buf[1] << "]";
 		while (true);
 	}
 	}
@@ -600,6 +630,10 @@ void Disconnect(int playerId) {
 
 	// remove from sector
 	session->exOverManager.ClearSendingData();
+	{
+		lock_guard<mutex> lock(session->recvedBufLock);
+		session->recvedBuf.clear();
+	}
 	int y = actor->y;
 	int x = actor->x;
 	auto sector_y = y / WORLD_SECTOR_SIZE;
@@ -624,11 +658,10 @@ void Disconnect(int playerId) {
 	//
 
 	actor->viewSetLock.lock();
-	actor->oldViewList.resize(actor->viewSet.size());
-	std::copy(actor->viewSet.begin(), actor->viewSet.end(), actor->oldViewList.begin());
+	vector<int> oldViewList(actor->viewSet.begin(), actor->viewSet.end());
 	actor->viewSet.clear();
 	actor->viewSetLock.unlock();
-	auto& m_old_view_list = actor->oldViewList;
+	auto& m_old_view_list = oldViewList;
 	for (auto pl : m_old_view_list) {
 		if (IsNpc(pl)) {
 			lock_guard<mutex> lock(GetActor(pl)->viewSetLock);
@@ -666,26 +699,44 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			Disconnect(key);
 			continue;
 		}
-		ExOver* exOver = reinterpret_cast<ExOver*>(recvOver);
+		auto exOver = reinterpret_cast<ExOver*>(recvOver);
 
-		switch (exOver->m_op) {
+		switch (exOver->op) {
 		case OP_RECV: {
-			unsigned char* recvPacketPtr = exOver->packetBuf;
 			auto session = GetActor(key)->session;
-			int totalRecvBufSize = recvBufSize + session->recvedBufSize;
+			unsigned char* recvPacketPtr;
+			auto totalRecvBufSize = static_cast<unsigned char>(recvBufSize);
+			if(session->recvedBufSize > 0){ // 남아있는게 있으면 남아있던 한패킷만 처리
+				const unsigned char prevPacketSize = session->recvedBuf[0];
+				const unsigned char splitBufSize = prevPacketSize - session->recvedBufSize;
+				session->recvedBuf.resize(prevPacketSize);
+				memcpy(1 + &session->recvedBuf.back(), exOver->packetBuf, splitBufSize);
+				recvPacketPtr = &session->recvedBuf[0];
+				ProcessPacket(key, recvPacketPtr);
+				recvPacketPtr = exOver->packetBuf + splitBufSize;
+				totalRecvBufSize -= splitBufSize;
+			}else{
+				recvPacketPtr = exOver->packetBuf;
+			}
 
-			for (int recvPacketSize = recvPacketPtr[0];
-				recvPacketSize <= totalRecvBufSize; ) {// 또는 받은 데이터가 없음
+			for (unsigned char recvPacketSize = recvPacketPtr[0];
+				0 < totalRecvBufSize;
+				recvPacketSize = recvPacketPtr[0]) {
 				ProcessPacket(key, recvPacketPtr);
 				totalRecvBufSize -= recvPacketSize;
 				recvPacketPtr += recvPacketSize;
-				if (totalRecvBufSize == 0)
-					break;
-				recvPacketSize = recvPacketPtr[0];
 			}
-			session->recvedBufSize = totalRecvBufSize;
-			if (0 < totalRecvBufSize)
-				memcpy(exOver->packetBuf, recvPacketPtr, totalRecvBufSize);
+			{
+				lock_guard<mutex> lock(session->recvedBufLock);
+				if (0 < totalRecvBufSize){
+					session->recvedBuf.resize(totalRecvBufSize);
+					session->recvedBufSize = totalRecvBufSize;
+					memcpy(&session->recvedBuf[0], recvPacketPtr, totalRecvBufSize);
+				}else{
+					session->recvedBuf.clear();
+					session->recvedBufSize = 0;
+				}
+			}
 			CallRecv(key);
 			break;
 		}
@@ -694,28 +745,26 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			break;
 		}
 		case OP_ACCEPT: {
-			int c_id = GetNewPlayerId(exOver->csocket);
-			auto session = GetActor(c_id)->session;
-			if (-1 != c_id) {
-				session->recvOver.m_op = OP_RECV;
-				session->recvedBufSize = 0;
+			int acceptId = GetNewPlayerId(exOver->csocket);
+			if (-1 != acceptId) {
+				auto session = GetActor(acceptId)->session;
 				CreateIoCompletionPort(
-					reinterpret_cast<HANDLE>(session->socket), h_iocp, c_id, 0);
-				CallRecv(c_id);
+					reinterpret_cast<HANDLE>(session->socket), h_iocp, acceptId, 0);
+				CallRecv(acceptId);
 			} else {
-				closesocket(session->socket);
+				closesocket(exOver->csocket);
 				cout << "인원 수 꽉참" << endl;
 			}
 
-			memset(&exOver->m_over, 0, sizeof(exOver->m_over));
+			memset(&exOver->over, 0, sizeof(exOver->over));
 			SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 			exOver->csocket = c_socket;
 			AcceptEx(l_socket, c_socket,
-				exOver->packetBuf, 0, 32, 32, NULL, &exOver->m_over);
+				exOver->packetBuf, 0, 32, 32, NULL, &exOver->over);
 			break;
 		}
 		case OP_RANDOM_MOVE_LOOP: {
-			add_event(key, OP_RANDOM_MOVE_LOOP, 1000);
+			AddEvent(key, OP_RANDOM_MOVE_LOOP, 1000);
 		}
 		case OP_RANDOM_MOVE: {
 			DoNpcRandomMove(actors[key]);
@@ -726,18 +775,17 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			break;
 		}
 		case OP_DELAY_SEND: {
-			// TODO 플레이어 키 상대로만 호출돼야함
 			exOver->GetManager()->SendAddedData(key);
 			exOver->Recycle();
 			break;
 		}
 		case OP_PLAYER_APPROACH: {
 			actors[key].luaLock.lock();
-			int moved_player = *reinterpret_cast<int*>(exOver->packetBuf);
+			const int moved_player = *reinterpret_cast<int*>(exOver->packetBuf);
 			lua_State* L = actors[key].L;
 			lua_getglobal(L, "player_is_near");
 			lua_pushnumber(L, moved_player);
-			int res = lua_pcall(L, 1, 0, 0);
+			const int res = lua_pcall(L, 1, 0, 0);
 			if (0 != res) {
 				cout << "LUA error in exec: " << lua_tostring(L, -1) << endl;
 			}
@@ -746,9 +794,9 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 			break;
 		}
 		case OP_SEND_MESSAGE: {
-			int c_id = *reinterpret_cast<int*>(exOver->packetBuf);
-			char* mess = reinterpret_cast<char*>(exOver->packetBuf + sizeof(int));
-			send_chat(key, c_id, mess);
+			const int senderId = *reinterpret_cast<int*>(exOver->packetBuf);
+			const auto mess = reinterpret_cast<char*>(exOver->packetBuf + sizeof(int));
+			send_chat(key, senderId, mess);
 			exOver->Recycle();
 			break;
 		}
@@ -777,8 +825,8 @@ void UpdateSector(int actorId, int prevX, int prevY, int x, int y) {
 void DoNpcRandomMove(Actor& npc) {
 	auto& x = npc.x;
 	auto& y = npc.y;
-	auto prevX = x;
-	auto prevY = y;
+	const auto prevX = x;
+	const auto prevY = y;
 	switch (rand() % 4) {
 	case 0: if (x < WORLD_X_SIZE - 1) ++x; break;
 	case 1: if (x > 0) --x; break;
@@ -787,13 +835,14 @@ void DoNpcRandomMove(Actor& npc) {
 	}
 	UpdateSector(npc.id, prevX, prevY, x, y);
 
+	lock_guard<mutex> lock(npc.oldNewViewListLock);
 	npc.viewSetLock.lock();
 	npc.oldViewList.resize(npc.viewSet.size());
 	std::copy(npc.viewSet.begin(), npc.viewSet.end(), npc.oldViewList.begin());
 	auto& oldViews = npc.oldViewList;
 	npc.viewSetLock.unlock();
 
-	auto&& newViews = GetIdFromOverlappedSector(npc.id);
+	npc.newViewList = GetIdFromOverlappedSector(npc.id);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{coutMutex};
 	cout << "npc[" << npc.id << "] (" << npc.x << "," << npc.y << ") 이동 " << oldViewList.size() << "명[";
@@ -807,7 +856,7 @@ void DoNpcRandomMove(Actor& npc) {
 	cout << "]한테 보임";
 #endif // NPCLOG
 
-	if (newViews.empty()) {
+	if (npc.newViewList.empty()) {
 		SleepNpc(npc.id); // 아무도 보이지 않으므로 취침
 #ifdef NPCLOG
 			cout << " & 아무에게도 안보여서 취침" << endl;
@@ -825,7 +874,7 @@ void DoNpcRandomMove(Actor& npc) {
 		}
 		return;
 	}
-	for (auto otherId : newViews) {
+	for (auto otherId : npc.newViewList) {
 		if (oldViews.end() == std::find(oldViews.begin(), oldViews.end(), otherId)) {
 			// 플레이어의 시야에 등장
 			auto actor = GetActor(otherId);
@@ -851,7 +900,7 @@ void DoNpcRandomMove(Actor& npc) {
 		}
 	}
 	for (auto otherId : oldViews) {
-		if (newViews.end() == std::find(newViews.begin(), newViews.end(), otherId)) {
+		if (npc.newViewList.end() == std::find(npc.newViewList.begin(), npc.newViewList.end(), otherId)) {
 			auto actor = GetActor(otherId);
 			npc.viewSetLock.lock();
 			npc.viewSet.erase(otherId);
@@ -964,9 +1013,9 @@ void MovePlayer(int playerId, DIRECTION dir) {
 				}
 #endif
 				auto ex_over = &actor->session->exOverManager.Get();
-				ex_over->m_op = OP_PLAYER_APPROACH;
+				ex_over->op = OP_PLAYER_APPROACH;
 				*reinterpret_cast<int*>(ex_over->packetBuf) = playerId;
-				PostQueuedCompletionStatus(hIocp, 1, pl, &ex_over->m_over);
+				PostQueuedCompletionStatus(hIocp, 1, pl, &ex_over->over);
 			}
 		}
 	}
@@ -1038,7 +1087,7 @@ int API_add_event_npc_random_move(lua_State* L) {
 	int p_id = lua_tonumber(L, -2);
 	int delay = lua_tonumber(L, -1);
 	lua_pop(L, 3);
-	add_event(p_id, OP_RANDOM_MOVE, delay);
+	AddEvent(p_id, OP_RANDOM_MOVE, delay);
 	return 0;
 }
 
@@ -1048,7 +1097,7 @@ int API_add_event_send_mess(lua_State* L) {
 	const char* mess = lua_tostring(L, -2);
 	int delay = lua_tonumber(L, -1);
 	lua_pop(L, 5);
-	add_event(recverId, OP_SEND_MESSAGE, delay, mess, senderId);
+	AddEvent(recverId, OP_SEND_MESSAGE, delay, mess, senderId);
 	return 0;
 }
 
@@ -1056,11 +1105,11 @@ void do_timer() {
 	using namespace chrono;
 	for (;;) {
 		timerLock.lock();
-		if (false == timerQueue.empty() && timerQueue.top().start_time < system_clock::now()) {
+		if (false == timerQueue.empty() && timerQueue.top().startTime < system_clock::now()) {
 			TimerEvent ev = timerQueue.top();
 			timerQueue.pop();
 			timerLock.unlock();
-			if (ev.e_type == OP_DELAY_SEND &&
+			if (ev.eventType == OP_DELAY_SEND &&
 				!actors[ev.object].session->exOverManager.HasSendData()) {
 				continue;
 			}
@@ -1069,21 +1118,21 @@ void do_timer() {
 				if (!actors[ev.object].isActive) {
 					continue;
 				}
-				auto over = GetActor(ev.object)->npcOver;
-				over->m_op = ev.e_type;
-				memset(&over->m_over, 0, sizeof(over->m_over));
+				auto npcOver = GetActor(ev.object)->npcOver;
+				npcOver->op = ev.eventType;
+				memset(&npcOver->over, 0, sizeof(npcOver->over));
 
-				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->m_over);
+				PostQueuedCompletionStatus(hIocp, 1, ev.object, &npcOver->over);
 			} else {
 				auto over = &GetActor(ev.object)->session->exOverManager.Get();
-				over->m_op = ev.e_type;
-				memcpy(over->packetBuf, &ev.target_id, sizeof(ev.target_id));
+				over->op = ev.eventType;
+				memcpy(over->packetBuf, &ev.targetId, sizeof(ev.targetId));
 				if (ev.hasBuffer) {
-					memcpy(over->packetBuf + sizeof(ev.target_id),
+					memcpy(over->packetBuf + sizeof(ev.targetId),
 						ev.buffer, 
-						min(sizeof(ev.buffer), sizeof(over->packetBuf) - sizeof(ev.target_id)));
+						min(sizeof(ev.buffer), sizeof(over->packetBuf) - sizeof(ev.targetId)));
 				}
-				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->m_over);
+				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
 			}
 		} else {
 			timerLock.unlock();
@@ -1099,6 +1148,7 @@ int main() {
 		pl.id = i;
 		pl.session = new Session;
 		pl.session->state = PLST_FREE;
+		pl.session->recvOver.op = OP_RECV;
 		pl.isActive = true;
 	}
 	for (int i = MAX_PLAYER + 1; i <= MAX_USER; i++) {
@@ -1111,7 +1161,7 @@ int main() {
 		auto sectorViewFrustumX = npc.x / WORLD_SECTOR_SIZE;
 		auto sectorViewFrustumY = npc.y / WORLD_SECTOR_SIZE;
 		npc.npcOver = new NpcOver;
-		memset(&npc.npcOver->m_over, 0, sizeof(npc.npcOver->m_over));
+		memset(&npc.npcOver->over, 0, sizeof(npc.npcOver->over));
 		npc.isActive = false;
 		world_sector[sectorViewFrustumY][sectorViewFrustumX].sector.insert(npc.id);
 		lua_State* L = npc.L = luaL_newstate();
@@ -1149,12 +1199,12 @@ int main() {
 	listen(listenSocket, SOMAXCONN);
 
 	ExOver accept_over;
-	accept_over.m_op = OP_ACCEPT;
-	memset(&accept_over.m_over, 0, sizeof(accept_over.m_over));
+	accept_over.op = OP_ACCEPT;
+	memset(&accept_over.over, 0, sizeof(accept_over.over));
 	SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 	accept_over.csocket = c_socket;
 	BOOL ret = AcceptEx(listenSocket, c_socket,
-		accept_over.packetBuf, 0, 32, 32, NULL, &accept_over.m_over);
+		accept_over.packetBuf, 0, 32, 32, NULL, &accept_over.over);
 	if (FALSE == ret) {
 		int err_num = WSAGetLastError();
 		if (err_num != WSA_IO_PENDING)
