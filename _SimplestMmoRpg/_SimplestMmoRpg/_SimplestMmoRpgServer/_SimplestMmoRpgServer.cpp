@@ -69,7 +69,7 @@ public:
 /// ExOver->Recycle() 호출하면 됨
 /// </summary>
 struct ExOverManager {
-#define INITAL_MANAGED_EXOVER_COUNT 3
+#define INITAL_MANAGED_EXOVER_COUNT 2
 private:
 	vector<ExOver*> managedExOvers;
 	mutex managedExOversLock;
@@ -142,22 +142,22 @@ public:
 
 	ExOver* Get() {
 		ExOver* result;
-		{
-			lock_guard<mutex> lg{ managedExOversLock };
-			size_t size = managedExOvers.size();
-			if (size == 0) {
-				managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
-				for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
-					managedExOvers[i] = new ExOver(this);
-					managedExOvers[i]->InitOver();
-				}
-				auto newOver = new ExOver(this);
-				newOver->InitOver();
-				return newOver;
+		managedExOversLock.lock();
+		size_t size = managedExOvers.size();
+		if (size == 0) {
+			managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
+			for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
+				managedExOvers[i] = new ExOver(this);
+				managedExOvers[i]->InitOver();
 			}
-			result = managedExOvers[size - 1];
-			managedExOvers.pop_back(); // 팝안하는 방식으로 최적화 가능
+			managedExOversLock.unlock();
+			auto newOver = new ExOver(this);
+			newOver->InitOver();
+			return newOver;
 		}
+		result = managedExOvers[size - 1];
+		managedExOvers.pop_back(); // 팝안하는 방식으로 최적화 가능
+		managedExOversLock.unlock();
 		return result;
 	}
 
@@ -166,9 +166,10 @@ public:
 	/// </summary>
 	/// <param name="usableGroup"></param>
 	void Recycle(ExOver* usableGroup) {
-		memset(&usableGroup->over, 0, sizeof(usableGroup->over));
-		lock_guard<mutex> lg{ managedExOversLock };
+		usableGroup->InitOver();
+		managedExOversLock.lock();
 		managedExOvers.push_back(usableGroup);
+		managedExOversLock.unlock();
 	}
 
 private:
@@ -188,7 +189,7 @@ private:
 		sendingDataQueue.push_back(recycleQueue);
 	}
 };
-size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 4;
+size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 2;
 struct TimerEvent {
 	int object;
 	EOpType eventType;
@@ -338,7 +339,7 @@ void ExOverManager::SendAddedData(int playerId) {
 	//	cout << "?gd" << endl;
 	//}
 	while (0 < totalSendDataSize) {
-		auto sendDataSize = min(BATCH_SEND_BYTES, (int)totalSendDataSize);
+		auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
 		auto exOver = Get();
 		exOver->op = OP_SEND;
 		memcpy(exOver->packetBuf, sendDataBegin, sendDataSize);
@@ -823,7 +824,7 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 				cout << "LUA error in exec: " << lua_tostring(L, -1) << endl;
 			}
 			actors[key].luaLock.unlock();
-			exOver->Recycle();
+			exOver->Recycle(); // NPC꺼 같지만 움직인 플레이어꺼로 호출하는거임
 			break;
 		}
 		case OP_SEND_MESSAGE: {
@@ -1151,7 +1152,7 @@ void do_timer() {
 				if (!actors[ev.object].isActive) {
 					continue;
 				}
-				auto npcOver = GetActor(ev.object)->npcOver;
+				auto npcOver = GetActor(ev.object)->npcOver; // TODO NPC가 보낸건 Recycle 안해야해서 헷갈린다.
 				npcOver->op = ev.eventType;
 				memset(&npcOver->over, 0, sizeof(npcOver->over));
 
@@ -1248,7 +1249,7 @@ int main() {
 
 	thread timer_thread(do_timer);
 	vector <thread> worker_threads;
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 3; ++i)
 		worker_threads.emplace_back(worker, hIocp, listenSocket);
 	for (auto& th : worker_threads)
 		th.join();
