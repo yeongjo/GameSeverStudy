@@ -24,4 +24,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="NPC.lua">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="Monster.lua">
+      <Filter>Source Files</Filter>
+    </None>
+  </ItemGroup>
 </Project>

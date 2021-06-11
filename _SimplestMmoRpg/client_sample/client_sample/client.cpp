@@ -3,6 +3,8 @@
 #include <SFML/Network.hpp>
 #include <iostream>
 #include <chrono>
+#include <list>
+#include <sstream>
 using namespace std;
 
 #ifdef _DEBUG
@@ -38,6 +40,28 @@ int g_myid;
 
 sf::RenderWindow* g_window;
 sf::Font g_font;
+sf::Text messageText;
+
+struct MessageLine {
+	string message;
+	long long print_time;
+	MessageLine(string message,	long long print_time) : message(message), print_time(print_time) {
+		
+	}
+};
+list<MessageLine> message_box;
+
+long long get_this_time() {
+	return static_cast<long long>(chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().
+		time_since_epoch()).count());
+}
+
+void add_message(string message) {
+	message_box.emplace_back(message, get_this_time());
+	if(message_box.size() > 10){
+		message_box.pop_front();
+	}
+}
 
 class OBJECT {
 private:
@@ -108,9 +132,31 @@ public:
 		m_chat.setStyle(sf::Text::Bold);
 		m_mess_end_time = chrono::system_clock::now() + chrono::seconds(3);
 	}
+	void print_stats(const char str[]) {
+		m_chat.setFont(g_font);
+		m_chat.setString(str);
+		m_chat.setFillColor(sf::Color(255, 0, 0));
+		m_chat.setStyle(sf::Text::Bold);
+		m_mess_end_time = chrono::system_clock::now() + chrono::seconds(1);
+	}
+};
+class Player : public OBJECT {
+	int hp, level, exp;
+	long long last_attack_time = 0;
+
+public:
+	Player(sf::Texture& t, int x, int y, int x2, int y2) : OBJECT(t,x,y,x2,y2){}
+	Player():OBJECT(){}
+	bool attack();
+	int GetHp() { return hp; }
+	int GetLevel() { return level; }
+	int GetExp() { return exp; }
+	void SetHp(int hp) { this->hp = hp; }
+	void SetLevel(int level) { this->level = level; }
+	void SetExp(int exp) { this->exp = exp; }
 };
 
-OBJECT avatar;
+Player avatar;
 OBJECT players[MAX_USER];
 
 OBJECT white_tile;
@@ -131,7 +177,7 @@ void client_initialize()
 	pieces->loadFromFile("chess2.png");
 	white_tile = OBJECT{ *board, 5, 5, TILE_WIDTH, TILE_WIDTH };
 	black_tile = OBJECT{ *board, 69, 5, TILE_WIDTH, TILE_WIDTH };
-	avatar = OBJECT{ *pieces, 128, 0, 64, 64 };
+	avatar = Player{ *pieces, 128, 0, 64, 64 };
 	//avatar.move(4, 4);
 	for (auto& pl : players) {
 		pl = OBJECT{ *pieces, 64, 0, 64, 64 };
@@ -155,6 +201,9 @@ void ProcessPacket(char* ptr)
 		g_myid = packet->id;
 		avatar.m_x = packet->x;
 		avatar.m_y = packet->y;
+		avatar.SetHp(packet->HP);
+		avatar.SetLevel(packet->LEVEL);
+		avatar.SetExp(packet->EXP);
 		//avatar.set_name(packet->name);
 		g_left_x = packet->x - SCREEN_WIDTH / 2;
 		g_top_y = packet->y - SCREEN_HEIGHT / 2;
@@ -230,6 +279,33 @@ void ProcessPacket(char* ptr)
 		}
 		break;
 	}
+	case SC_STAT_CHANGE: {
+		auto my_packet = reinterpret_cast<sc_packet_stat_change*>(ptr);
+		stringstream ss;
+		ss << my_packet->HP;
+		ss << " ";
+		if (my_packet->id == g_myid) {
+			avatar.SetHp(my_packet->HP);
+			avatar.SetLevel(my_packet->LEVEL);
+			avatar.SetExp(my_packet->EXP);
+			ss << my_packet->LEVEL;
+			ss << " ";
+			ss << my_packet->EXP;
+		}
+		players[my_packet->id].print_stats(ss.str().c_str());
+		ss.str("");
+		ss.clear();
+		ss << "id: ";
+		ss << my_packet->id;
+		ss << " hp:";
+		ss << my_packet->HP;
+		ss << " lvl:";
+		ss << my_packet->LEVEL;
+		ss << " exp:";
+		ss << my_packet->EXP;
+		add_message(ss.str());
+		break;
+	}
 	default:
 		printf("Unknown PACKET type [%d]\n", ptr[1]);
 	}
@@ -295,9 +371,16 @@ void client_main()
 	sf::Text text;
 	text.setFont(g_font);
 	char buf[100];
-	sprintf_s(buf, "(%d, %d)", avatar.m_x, avatar.m_y);
+	sprintf_s(buf, "(%d, %d) hp %d  lvl %d  exp %d", avatar.m_x, avatar.m_y, avatar.GetHp(), avatar.GetLevel(), avatar.GetExp());
 	text.setString(buf);
 	g_window->draw(text);
+	auto pos = text.getPosition();
+	for (auto message_line : message_box){
+		pos.y += 30;
+		text.setPosition(pos.x, pos.y);
+		text.setString(message_line.message.c_str());
+		g_window->draw(text);
+	}
 }
 
 void send_move_packet(DIRECTION dr)
@@ -319,6 +402,24 @@ void send_login_packet(string &name)
 	strcpy_s(packet.player_id, name.c_str());
 	size_t sent = 0;
 	socket.send(&packet, sizeof(packet), sent);
+}
+
+void send_attack_packet() {
+	cs_packet_attack packet;
+	packet.size = sizeof(packet);
+	packet.type = CS_ATTACK;
+	size_t sent = 0;
+	socket.send(&packet, sizeof(packet), sent);
+}
+
+bool Player::attack() {
+	auto now = get_this_time();
+	if (now - last_attack_time >= 1000) {
+		send_attack_packet();
+		last_attack_time = now;
+		return true;
+	}
+	return false;
 }
 
 int main()
@@ -367,6 +468,10 @@ int main()
 				case sf::Keyboard::Down:
 					p_type = D_S;
 					break;
+				case sf::Keyboard::A: {
+					avatar.attack();
+					break;
+				}
 				case sf::Keyboard::Escape:
 					window.close();
 					break;

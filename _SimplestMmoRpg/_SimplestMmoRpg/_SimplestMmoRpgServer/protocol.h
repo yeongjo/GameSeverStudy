@@ -146,9 +146,10 @@ typedef  cs_packet_move c2s_move;
 typedef  cs_packet_login c2s_login;
 
 
-#define MAX_BUFFER 256
-#define MAX_PLAYER (NPC_ID_START)
-#define MAX_NPC (MAX_USER-NPC_ID_START)
-#define MESSAGE_MAX_BUFFER MAX_STR_LEN
-#define MAX_NAME MAX_ID_LEN
+constexpr int MAX_BUFFER= 256;
+constexpr int MAX_PLAYER=(NPC_ID_START);
+constexpr int MAX_NPC=(MAX_USER - NPC_ID_START);
+constexpr int MONSTER_ID_START = (MAX_NPC/2+NPC_ID_START);
+constexpr int MESSAGE_MAX_BUFFER= MAX_STR_LEN;
+constexpr int MAX_NAME= MAX_ID_LEN;
 enum DIRECTION { D_N, D_S, D_W, D_E, D_NO };
