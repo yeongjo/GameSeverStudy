@@ -1,7 +1,7 @@
 // =============== 최적화 ===============
-// ExOverManager::Get(), ExOverManager::Recycle을 이용한 ExOver 재활용
-// ExOverManager::AddSendingData()으로 패킷을 저장했다
-// 별도의 스레드에서 ExOverManager::SendAddedData() 호출로 패킷 한꺼번에 보냄으로 WSASend호출 최소화
+// BufOverManager::Get(), BufOverManager::Recycle을 이용한 BufOver 재활용
+// BufOverManager::AddSendingData()으로 패킷을 저장했다
+// 별도의 스레드에서 BufOverManager::SendAddedData() 호출로 패킷 한꺼번에 보냄으로 WSASend호출 최소화
 // CanSee와 Array를 활용한 섹터처리로 시야내 플레이어에게만 패킷보냄
 // ===========================================
 
@@ -48,7 +48,7 @@
 #include <unordered_set>
 class Player;
 struct Actor;
-struct ExOverManager;
+struct BufOverManager;
 using namespace std;
 #include <WS2tcpip.h>
 #include <MSWSock.h>
@@ -81,10 +81,9 @@ constexpr int WORLD_SECTOR_SIZE = (VIEW_RADIUS + 2);
 constexpr int WORLD_SECTOR_X_COUNT = ceil_const(WORLD_WIDTH / (float)WORLD_SECTOR_SIZE);
 constexpr int WORLD_SECTOR_Y_COUNT = ceil_const(WORLD_HEIGHT / (float)WORLD_SECTOR_SIZE);
 
-enum EEventType { OP_RECV, OP_SEND, OP_ACCEPT, OP_NPC_LOOP, OP_RANDOM_MOVE, OP_ATTACK, OP_PLAYER_APPROACH, OP_SEND_MESSAGE, OP_DELAY_SEND };
 enum EPlayerState { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
-void AddEvent(int obj, EEventType type, int delayMs, const char* buffer = nullptr, int targetId = -1);
+typedef function<void(int)> iocpCallback;
 
 template <typename T, typename U>
 void asTable(lua_State* L, T begin, U end) {
@@ -107,38 +106,44 @@ void fromTable(lua_State* L, T begin, U end) {
 	}
 }
 
-struct NpcOver {
+struct MiniOver {
 	WSAOVERLAPPED	over; // 클래스 생성자에서 초기화하니 값이 원래대로 돌아온다??
-	function<void()> callback;
-	EEventType			op;
+	iocpCallback callback;
+	virtual void Recycle(){}
 };
-struct ExOver : public NpcOver {
+struct AcceptOver : public MiniOver {
+	SOCKET			cSocket;					// OP_ACCEPT에서만 사용
+	WSABUF			wsabuf[1];
+};
+struct BufOver : public MiniOver {
 	WSABUF			wsabuf[1];
 	unsigned char	packetBuf[MAX_BUFFER];
-	SOCKET			csocket;					// OP_ACCEPT에서만 사용
 private:
-	ExOverManager* manager;
+	BufOverManager* manager;
 public:
-	ExOver() {}
-	ExOver(ExOverManager* manager) : manager(manager) {}
+	BufOver() {}
+	BufOver(BufOverManager* manager) : manager(manager) {}
 	void InitOver() {
 		memset(&over, 0, sizeof(over));
 	}
 
-	void Recycle();
-	ExOverManager* GetManager() {
+	void Recycle() override;
+	BufOverManager* GetManager() {
 		return manager;
 	}
 };
+struct RecvOver : public BufOver {
+	void Recycle() override { }
+};
 
 /// <summary>
-/// Get()으로 ExOver 쓰고
-/// ExOver->Recycle() 호출하면 됨
+/// Get()으로 BufOver 쓰고
+/// BufOver->Recycle() 호출하면 됨
 /// </summary>
-struct ExOverManager {
+struct BufOverManager {
 #define INITAL_MANAGED_EXOVER_COUNT 2
 private:
-	vector<ExOver*> managedExOvers;
+	vector<BufOver*> managedExOvers;
 	mutex managedExOversLock;
 	vector<unsigned char> sendingData;
 	mutex sendingDataLock;
@@ -147,15 +152,15 @@ private:
 	static size_t EX_OVER_SIZE_INCREMENT;
 
 public:
-	ExOverManager() : managedExOvers(INITAL_MANAGED_EXOVER_COUNT) {
+	BufOverManager() : managedExOvers(INITAL_MANAGED_EXOVER_COUNT) {
 		auto size = INITAL_MANAGED_EXOVER_COUNT;
 		for (size_t i = 0; i < size; ++i) {
-			managedExOvers[i] = new ExOver(this);
+			managedExOvers[i] = new BufOver(this);
 			managedExOvers[i]->InitOver();
 		}
 	}
 
-	virtual ~ExOverManager() {
+	virtual ~BufOverManager() {
 		for (auto queue : sendingDataQueue) {
 			delete queue;
 		}
@@ -200,18 +205,18 @@ public:
 	/// <param name="playerId"></param>
 	void SendAddedData(int playerId);
 
-	ExOver* Get() {
-		ExOver* result;
+	BufOver* Get() {
+		BufOver* result;
 		managedExOversLock.lock();
 		size_t size = managedExOvers.size();
 		if (size == 0) {
 			managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
 			for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
-				managedExOvers[i] = new ExOver(this);
+				managedExOvers[i] = new BufOver(this);
 				managedExOvers[i]->InitOver();
 			}
 			managedExOversLock.unlock();
-			auto newOver = new ExOver(this);
+			auto newOver = new BufOver(this);
 			newOver->InitOver();
 			return newOver;
 		}
@@ -222,10 +227,10 @@ public:
 	}
 
 	/// <summary>
-	/// 직접 호출하는 함수 아님 ExOver::Recycle사용할것
+	/// 직접 호출하는 함수 아님 BufOver::Recycle사용할것
 	/// </summary>
 	/// <param name="usableGroup"></param>
-	void Recycle(ExOver* usableGroup) {
+	void Recycle(BufOver* usableGroup) {
 		usableGroup->InitOver();
 		managedExOversLock.lock();
 		managedExOvers.push_back(usableGroup);
@@ -249,10 +254,17 @@ private:
 		sendingDataQueue.push_back(recycleQueue);
 	}
 };
-size_t ExOverManager::EX_OVER_SIZE_INCREMENT = 2;
+
+typedef function<bool ()> TimerEventCheckCondition;
+
+size_t BufOverManager::EX_OVER_SIZE_INCREMENT = 2;
 struct TimerEvent {
 	int object;
-	EEventType eventType;
+	/// <summary>
+	/// false면 타이머에서 빠진다.
+	/// </summary>
+	TimerEventCheckCondition checkCondition;
+	iocpCallback callback;
 	chrono::system_clock::time_point startTime;
 	int targetId;
 	char buffer[MESSAGE_MAX_BUFFER];
@@ -289,19 +301,20 @@ public:
 };
 class TimerQueue : public removable_priority_queue<TimerEvent> {
 public:
-	bool remove(const int playerId, const EEventType eventType) {
-		auto size = this->c.size();
-		for (size_t i = 0; i < size;) {
-			if (this->c[i].object == playerId && this->c[i].eventType == eventType) {
-				auto begin = this->c.begin();
-				this->c.erase(begin + i);
-				--size;
-				return true;
-			}
-			++i;
-		}
-		return false;
-	}
+	// TODO Add할때 id 리턴받고 그거 바탕으로 지워야할듯 근데 당장은 쓸일없음
+	//bool remove(const int playerId, const EEventType eventType) {
+	//	auto size = this->c.size();
+	//	for (size_t i = 0; i < size;) {
+	//		if (this->c[i].object == playerId && this->c[i].eventType == eventType) {
+	//			auto begin = this->c.begin();
+	//			this->c.erase(begin + i);
+	//			--size;
+	//			return true;
+	//		}
+	//		++i;
+	//	}
+	//	return false;
+	//}
 	void remove_all(const int playerId) {
 		auto size = this->c.size();
 		auto object = playerId;
@@ -316,6 +329,50 @@ public:
 		}
 	}
 };
+
+
+constexpr int SERVER_ID = 0;
+HANDLE hIocp;
+
+class TimerQueueManager {
+	/// <summary>
+	/// timerLock으로 잠궈주고 사용
+	/// </summary>
+	static TimerQueue timerQueue;
+	static mutex timerLock;
+
+public:
+	static void Add(TimerEvent event) {
+		lock_guard<mutex> lock(timerLock);
+		timerQueue.push(event);
+	}
+
+	static void RemoveAll(int playerId) {
+		lock_guard<mutex> lock(timerLock);
+		timerQueue.remove_all(playerId);
+	}
+
+	static void Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback, const char* buffer = 0, int targetId = 0) {
+		using namespace chrono;
+		TimerEvent ev;
+		ev.checkCondition = checkCondition;
+		ev.callback = callback;
+		ev.object = obj;
+		ev.startTime = system_clock::now() + milliseconds(delayMs);
+		ev.targetId = targetId;
+		if (nullptr != buffer) {
+			memcpy(ev.buffer, buffer, sizeof(char) * (strlen(buffer) + 1));
+			ev.hasBuffer = true;
+		} else {
+			ev.hasBuffer = false;
+		}
+		Add(ev);
+	}
+
+	static void Do();
+};
+TimerQueue TimerQueueManager::timerQueue;
+mutex TimerQueueManager::timerLock;
 
 // TODO 섹터 매니저 만들어서 하거나, static 사용해서 객체지향적으로 만들면 좋을듯
 struct SECTOR {
@@ -341,8 +398,8 @@ array <array <SECTOR, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> world_sector;
 
 struct Session {
 	atomic<EPlayerState> state;
-	ExOver recvOver;
-	ExOverManager exOverManager;
+	RecvOver recvOver;
+	BufOverManager bufOverManager;
 
 	/// <summary>
 	/// socketLock으로 잠궈주고 사용
@@ -398,9 +455,7 @@ struct Actor {
 	/// </summary>
 	unordered_set<int> viewSet;
 	mutex   viewSetLock;
-
-	NpcOver* npcOver;	// Npc ID로 PostQueuedCompletionStatus 호출할때 사용
-
+	
 	/// <summary>
 	/// luaLock으로 잠궈주고 사용
 	/// </summary>
@@ -456,6 +511,7 @@ public:
 	virtual int GetLevel() { return -1; }
 	virtual int GetExp() { return -1; }
 	virtual int GetDamage() { return -1; }
+	virtual MiniOver* GetOver() { return nullptr; }
 	virtual void SetExp(int exp) {}
 	virtual void SetLevel(int level) {}
 	virtual void SetHp(int hp) {}
@@ -605,7 +661,9 @@ int API_add_event_npc_random_move(lua_State* L) {
 	int p_id = lua_tonumber(L, -2);
 	int delay = lua_tonumber(L, -1);
 	lua_pop(L, 3);
-	AddEvent(p_id, OP_RANDOM_MOVE, delay);
+	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
+		GetActor(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
+	});
 	return 1;
 }
 
@@ -615,7 +673,9 @@ int API_add_event_send_mess(lua_State* L) {
 	const char* mess = lua_tostring(L, -2);
 	int delay = lua_tonumber(L, -1);
 	lua_pop(L, 5);
-	AddEvent(recverId, OP_SEND_MESSAGE, delay, mess, senderId);
+	TimerQueueManager::Add(recverId, delay, nullptr, [=](int size) {
+		send_chat(recverId, senderId, mess);
+		});
 	return 1;
 }
 void UpdateSector(int actorId, int prevX, int prevY, int x, int y);
@@ -637,14 +697,9 @@ protected:
 	int exp = 0;
 	int damage = 1;
 	vector<int> attackViewList;
-	Session* session;	// 플레이어와 같은 세션 접속 유저만 사용
-	Player(int id) : Actor(id) {
-		actors[id] = this;
-		session = new Session;
-		session->state = PLST_FREE;
-		session->recvOver.op = OP_RECV;
-		isActive = true;
-	}
+	Session session;	// 플레이어와 같은 세션 접속 유저만 사용
+	
+	Player(int id);
 
 public:
 	static Player* Get(int id) {
@@ -695,7 +750,10 @@ public:
 		viewSetLock.unlock();
 	}
 
-	Session* GetSession() { return session; }
+	MiniOver* GetOver() override {
+		return session.bufOverManager.Get();
+	}
+	Session* GetSession() { return &session; }
 	int GetHp() override { return hp; }
 	int GetLevel() override { return level; }
 	int GetExp() override { return exp; }
@@ -720,6 +778,7 @@ void send_login_ok_packet(int targetId) {
 }
 
 class NonPlayer : public Actor {
+	MiniOver miniOver;	// Npc ID로 PostQueuedCompletionStatus 호출할때 사용
 protected:
 	NonPlayer(int id) : Actor(id) {}
 	
@@ -728,11 +787,7 @@ protected:
 		luaL_openlibs(L);
 		luaL_loadfile(L, path);
 		CallLuaFunction(L, 0, 0);
-
-		lua_getglobal(L, "set_uid");
-		lua_pushnumber(L, id);
-		CallLuaFunction(L, 1, 0);
-
+		
 		lua_register(L, "API_set_pos", API_set_pos);
 		lua_register(L, "API_get_x", API_get_x);
 		lua_register(L, "API_get_y", API_get_y);
@@ -745,13 +800,17 @@ protected:
 		lua_register(L, "API_print", API_print);
 		lua_register(L, "API_add_event_npc_random_move", API_add_event_npc_random_move);
 		lua_register(L, "API_add_event_send_mess", API_add_event_send_mess);
+
+		lua_getglobal(L, "set_uid");
+		lua_pushnumber(L, id);
+		CallLuaFunction(L, 1, 0);
+
 	}
 
 	void Init() override {
 		moveTime = 0;
 		isActive = false;
-		npcOver = new NpcOver;
-		memset(&npcOver->over, 0, sizeof(npcOver->over));
+		memset(&miniOver.over, 0, sizeof(miniOver.over));
 		InitSector();
 	}
 
@@ -783,6 +842,9 @@ protected:
 	void Die() override;
 
 	void SetPos(int x, int y) override;
+	MiniOver* GetOver() override {
+		return &miniOver;
+	}
 	int GetHp() override {
 		lua_getglobal(L, "get_hp");
 		CallLuaFunction(L, 0, 1);
@@ -871,87 +933,6 @@ public:
 	}
 };
 
-constexpr int SERVER_ID = 0;
-HANDLE hIocp;
-enum EActorType{EPlayer, ENpc, EMonster};
-
-class TimerQueueManager {
-	/// <summary>
-	/// timerLock으로 잠궈주고 사용
-	/// </summary>
-	static TimerQueue timerQueue;
-	static mutex timerLock;
-
-public:
-	static void Add(TimerEvent event) {
-		lock_guard<mutex> lock(timerLock);
-		timerQueue.push(event);
-	}
-
-	static void RemoveAll(int playerId) {
-		lock_guard<mutex> lock(timerLock);
-		timerQueue.remove_all(playerId);
-	}
-
-	static void Add(int obj, EEventType type, int delayMs, const char* buffer, int targetId) {
-		using namespace chrono;
-		TimerEvent ev;
-		ev.eventType = type;
-		ev.object = obj;
-		ev.startTime = system_clock::now() + milliseconds(delayMs);
-		ev.targetId = targetId;
-		if (nullptr != buffer) {
-			memcpy(ev.buffer, buffer, sizeof(char) * (strlen(buffer) + 1));
-			ev.hasBuffer = true;
-		} else {
-			ev.hasBuffer = false;
-		}
-		Add(ev);
-	}
-
-	static void Do() {
-		using namespace chrono;
-		for (;;) {
-			timerLock.lock();
-			if (false == timerQueue.empty() && timerQueue.top().startTime < system_clock::now()) {
-				TimerEvent ev = timerQueue.top();
-				timerQueue.pop();
-				timerLock.unlock();
-				if (ev.eventType == OP_DELAY_SEND &&
-					!GetPlayer(ev.object)->GetSession()->exOverManager.HasSendData()) {
-					continue;
-				}
-
-				if (IsNpc(ev.object)) {
-					if (!GetActor(ev.object)->isActive) {
-						continue;
-					}
-					auto npcOver = GetActor(ev.object)->npcOver; // TODO NPC가 보낸건 Recycle 안해야해서 헷갈린다.
-					npcOver->op = ev.eventType;
-					memset(&npcOver->over, 0, sizeof(npcOver->over));
-
-					PostQueuedCompletionStatus(hIocp, 1, ev.object, &npcOver->over);
-				} else {
-					auto over = GetPlayer(ev.object)->GetSession()->exOverManager.Get();
-					over->op = ev.eventType;
-					memcpy(over->packetBuf, &ev.targetId, sizeof(ev.targetId));
-					if (ev.hasBuffer) {
-						memcpy(over->packetBuf + sizeof(ev.targetId),
-							ev.buffer,
-							min(sizeof(ev.buffer), sizeof(over->packetBuf) - sizeof(ev.targetId)));
-					}
-					PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
-				}
-			} else {
-				timerLock.unlock();
-				this_thread::sleep_for(10ms);
-			}
-		}
-	}
-};
-TimerQueue TimerQueueManager::timerQueue;
-mutex TimerQueueManager::timerLock;
-
 void Disconnect(int playerId);
 
 void display_error(const char* msg, int errNum) {
@@ -967,9 +948,14 @@ void display_error(const char* msg, int errNum) {
 }
 
 void AddSendingData(int targetId, void* buf) {
-	_ASSERT(!IsNpc(targetId));
-	AddEvent(targetId, OP_DELAY_SEND, 12);
-	GetPlayer(targetId)->GetSession()->exOverManager.AddSendingData(buf);
+	_ASSERT(SERVER_ID < targetId && !IsNpc(targetId));
+	auto& manager = GetPlayer(targetId)->GetSession()->bufOverManager;
+	TimerQueueManager::Add(targetId, 12, [&]() {
+		return manager.HasSendData();
+		}, [&, targetId](int size) {
+			manager.SendAddedData(targetId);
+		});
+	manager.AddSendingData(buf);
 }
 
 int API_send_stat_change(lua_State* L) {
@@ -986,12 +972,12 @@ int API_send_stat_change(lua_State* L) {
 	return 1;
 }
 
-void ExOver::Recycle() {
+void BufOver::Recycle() {
 	_ASSERT(manager != nullptr, "manager가 null입니다");
 	manager->Recycle(this);
 }
 
-void ExOverManager::SendAddedData(int playerId) {
+void BufOverManager::SendAddedData(int playerId) {
 	sendingDataLock.lock();
 	auto totalSendDataSize = sendingData.size();
 	if (totalSendDataSize == 0) {
@@ -1011,7 +997,7 @@ void ExOverManager::SendAddedData(int playerId) {
 	while (0 < totalSendDataSize) {
 		auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
 		auto exOver = Get();
-		exOver->op = OP_SEND;
+		exOver->callback = [](int size) { };
 		memcpy(exOver->packetBuf, sendDataBegin, sendDataSize);
 		exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(exOver->packetBuf);
 		exOver->wsabuf[0].len = sendDataSize;
@@ -1032,6 +1018,30 @@ void ExOverManager::SendAddedData(int playerId) {
 		sendDataBegin += sendDataSize;
 	}
 	RecycleSendingDataQueue(&copiedSendingData);
+}
+
+void TimerQueueManager::Do() {
+	using namespace chrono;
+	for (;;){
+		timerLock.lock();
+		if (false == timerQueue.empty() && timerQueue.top().startTime < system_clock::now()){
+			TimerEvent ev = timerQueue.top();
+			timerQueue.pop();
+			timerLock.unlock();
+			if (ev.checkCondition != nullptr && !ev.checkCondition()){
+				continue;
+			}
+
+			auto over = GetActor(ev.object)->GetOver();
+			over->callback = ev.callback;
+			memset(&over->over, 0, sizeof(over->over));
+			PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
+		}
+		else{
+			timerLock.unlock();
+			this_thread::sleep_for(10ms);
+		}
+	}
 }
 
 void CallRecv(int key) {
@@ -1157,13 +1167,20 @@ vector<int>& GetIdFromOverlappedSector(int p_id) {
 	return returnSector;
 }
 
+void AddNpcLoopEvent(int id) {
+	TimerQueueManager::Add(id, 1000, nullptr, [=](int) {
+		AddNpcLoopEvent(id);
+		GetActor(id)->Update();
+		});
+}
+
 void WakeUpNpc(int id) {
 	auto actor = GetActor(id);
 	if (actor->isActive == false) {
 		bool old_state = false;
 		if (true == atomic_compare_exchange_strong(&actor->isActive, &old_state, true)) {
 			//cout << "wake up id: " << id << " is active: "<< actor->isActive << endl;
-			AddEvent(id, OP_NPC_LOOP, 1000);
+			AddNpcLoopEvent(id);
 		}
 	}
 }
@@ -1253,7 +1270,7 @@ void Disconnect(int playerId) {
 	closesocket(session->socket);
 	session->state = PLST_FREE;
 
-	session->exOverManager.ClearSendingData();
+	session->bufOverManager.ClearSendingData();
 	{
 		lock_guard<mutex> lock(session->recvedBufLock);
 		session->recvedBuf.clear();
@@ -1288,128 +1305,6 @@ void Disconnect(int playerId) {
 			send_remove_object(otherPlayer->id, playerId);
 			lock_guard<mutex> lock(otherPlayer->viewSetLock);
 			otherPlayer->viewSet.erase(actor->id);
-		}
-	}
-}
-
-void worker(HANDLE h_iocp, SOCKET l_socket) {
-	while (true) {
-		DWORD recvBufSize;
-		ULONG_PTR recvKey;
-		WSAOVERLAPPED* recvOver;
-
-		BOOL ret = GetQueuedCompletionStatus(h_iocp, &recvBufSize,
-			&recvKey, &recvOver, INFINITE);
-
-		int key = static_cast<int>(recvKey);
-		if (FALSE == ret) {
-			display_error("GQCS : ", WSAGetLastError());
-			if (SERVER_ID == key) {
-				cout << "서버키가 Key로 넘어옴" << endl;
-				exit(-1);
-			}
-			Disconnect(key);
-		}
-		if ((key != SERVER_ID) && (0 == recvBufSize)) {
-			Disconnect(key);
-			continue;
-		}
-		auto exOver = reinterpret_cast<ExOver*>(recvOver);
-
-		switch (exOver->op) {
-		case OP_RECV: {
-			auto session = GetPlayer(key)->GetSession();
-			unsigned char* recvPacketPtr;
-			auto totalRecvBufSize = static_cast<unsigned char>(recvBufSize);
-			if (session->recvedBufSize > 0) { // 남아있는게 있으면 남아있던 한패킷만 처리
-				const unsigned char prevPacketSize = session->recvedBuf[0];
-				const unsigned char splitBufSize = prevPacketSize - session->recvedBufSize;
-				session->recvedBuf.resize(prevPacketSize);
-				memcpy(1 + &session->recvedBuf.back(), exOver->packetBuf, splitBufSize);
-				recvPacketPtr = &session->recvedBuf[0];
-				ProcessPacket(key, recvPacketPtr);
-				recvPacketPtr = exOver->packetBuf + splitBufSize;
-				totalRecvBufSize -= splitBufSize;
-			} else {
-				recvPacketPtr = exOver->packetBuf;
-			}
-
-			for (unsigned char recvPacketSize = recvPacketPtr[0];
-				0 < totalRecvBufSize;
-				recvPacketSize = recvPacketPtr[0]) {
-				ProcessPacket(key, recvPacketPtr);
-				totalRecvBufSize -= recvPacketSize;
-				recvPacketPtr += recvPacketSize;
-			}
-			{
-				lock_guard<mutex> lock(session->recvedBufLock);
-				if (0 < totalRecvBufSize) {
-					session->recvedBuf.resize(totalRecvBufSize);
-					session->recvedBufSize = totalRecvBufSize;
-					memcpy(&session->recvedBuf[0], recvPacketPtr, totalRecvBufSize);
-				} else {
-					session->recvedBuf.clear();
-					session->recvedBufSize = 0;
-				}
-			}
-			CallRecv(key);
-			break;
-		}
-		case OP_SEND: {
-			exOver->Recycle();
-			break;
-		}
-		case OP_ACCEPT: {
-			int acceptId = GetNewPlayerId(exOver->csocket);
-			if (-1 != acceptId) {
-				auto session = GetPlayer(acceptId)->GetSession();
-				CreateIoCompletionPort(
-					reinterpret_cast<HANDLE>(session->socket), h_iocp, acceptId, 0);
-				CallRecv(acceptId);
-			} else {
-				closesocket(exOver->csocket);
-				cout << "인원 수 꽉참" << endl;
-			}
-
-			memset(&exOver->over, 0, sizeof(exOver->over));
-			SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-			exOver->csocket = c_socket;
-			AcceptEx(l_socket, c_socket,
-				exOver->packetBuf, 0, 32, 32, NULL, &exOver->over);
-			break;
-		}
-		case OP_NPC_LOOP: {
-			AddEvent(key, OP_NPC_LOOP, 1000);
-			GetActor(key)->Update();
-			break;
-		}
-		case OP_RANDOM_MOVE: {
-			GetActor(key)->Move(static_cast<DIRECTION>(rand() % 4));
-			break;
-		}
-		case OP_ATTACK: {
-			exOver->Recycle();
-			break;
-		}
-		case OP_DELAY_SEND: {
-			exOver->GetManager()->SendAddedData(key);
-			exOver->Recycle();
-			break;
-		}
-		case OP_PLAYER_APPROACH: { // TODO 지워도 되는거같음
-			auto actor = GetActor(key);
-			const int moved_player = *reinterpret_cast<int*>(exOver->packetBuf);
-			actor->OnNearActorWithPlayerMove(moved_player);
-			exOver->Recycle(); // NPC꺼 같지만 움직인 플레이어꺼로 호출하는거임
-			break;
-		}
-		case OP_SEND_MESSAGE: {
-			const int senderId = *reinterpret_cast<int*>(exOver->packetBuf);
-			const auto mess = reinterpret_cast<char*>(exOver->packetBuf + sizeof(int));
-			send_chat(key, senderId, mess);
-			exOver->Recycle();
-			break;
-		}
 		}
 	}
 }
@@ -1574,6 +1469,50 @@ void Monster::Update() {
 	CallLuaFunction(L, 1, 0);
 }
 
+Player::Player(int id): Actor(id) {
+	actors[id] = this;
+	isActive = true;
+	session.state = PLST_FREE;
+	session.recvOver.callback = [this](int bufSize) {
+		auto exOver = session.recvOver;
+		unsigned char* recvPacketPtr;
+		auto totalRecvBufSize = static_cast<unsigned char>(bufSize);
+		if (session.recvedBufSize > 0) {
+			// 남아있는게 있으면 남아있던 한패킷만 처리
+			const unsigned char prevPacketSize = session.recvedBuf[0];
+			const unsigned char splitBufSize = prevPacketSize - session.recvedBufSize;
+			session.recvedBuf.resize(prevPacketSize);
+			memcpy(1 + &session.recvedBuf.back(), exOver.packetBuf, splitBufSize);
+			recvPacketPtr = &session.recvedBuf[0];
+			ProcessPacket(this->id, recvPacketPtr);
+			recvPacketPtr = exOver.packetBuf + splitBufSize;
+			totalRecvBufSize -= splitBufSize;
+		} else {
+			recvPacketPtr = exOver.packetBuf;
+		}
+
+		for (unsigned char recvPacketSize = recvPacketPtr[0];
+			0 < totalRecvBufSize;
+			recvPacketSize = recvPacketPtr[0]) {
+			ProcessPacket(this->id, recvPacketPtr);
+			totalRecvBufSize -= recvPacketSize;
+			recvPacketPtr += recvPacketSize;
+		}
+		{
+			lock_guard<mutex> lock(session.recvedBufLock);
+			if (0 < totalRecvBufSize) {
+				session.recvedBuf.resize(totalRecvBufSize);
+				session.recvedBufSize = totalRecvBufSize;
+				memcpy(&session.recvedBuf[0], recvPacketPtr, totalRecvBufSize);
+			} else {
+				session.recvedBuf.clear();
+				session.recvedBufSize = 0;
+			}
+		}
+		CallRecv(this->id);
+	};
+}
+
 void Player::Move(DIRECTION dir) {
 	auto x = this->x;
 	auto y = this->y;
@@ -1663,6 +1602,49 @@ bool Player::TakeDamage(int attackerId) {
 	return false;
 }
 
+void worker(HANDLE h_iocp, SOCKET l_socket) {
+	while (true) {
+		DWORD recvBufSize;
+		ULONG_PTR recvKey;
+		WSAOVERLAPPED* recvOver;
+
+		BOOL ret = GetQueuedCompletionStatus(h_iocp, &recvBufSize,
+			&recvKey, &recvOver, INFINITE);
+
+		int key = static_cast<int>(recvKey);
+		if (FALSE == ret) {
+			display_error("GQCS : ", WSAGetLastError());
+			if (SERVER_ID == key) {
+				cout << "서버키가 Key로 넘어옴" << endl;
+				exit(-1);
+			}
+			Disconnect(key);
+		}
+		if ((key != SERVER_ID) && (0 == recvBufSize)) {
+			Disconnect(key);
+			continue;
+		}
+		auto over = reinterpret_cast<MiniOver*>(reinterpret_cast<char*>(recvOver)-sizeof(void*)); // vtable 로 인해 포인터 바이트수 만큼 뺌
+		cout << over << endl;
+
+		over->callback(recvBufSize);
+		over->Recycle();
+	}
+}
+
+void CallAccept(AcceptOver& over, SOCKET listenSocket) {
+	memset(&over.over, 0, sizeof(over.over));
+	const SOCKET cSocket = WSASocket(AF_INET, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+	over.cSocket = cSocket;
+	const auto ret = AcceptEx(listenSocket, cSocket,
+	                          &over.wsabuf[0], 0, 32, 32, nullptr, &over.over);
+	if (FALSE == ret) {
+		const int err_num = WSAGetLastError();
+		if (err_num != WSA_IO_PENDING)
+			display_error("AcceptEx Error", err_num);
+	}
+}
+
 int main() {
 	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
 		Player::Get(i);
@@ -1693,19 +1675,24 @@ int main() {
 	serverAddr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
 	::bind(listenSocket, (struct sockaddr*)&serverAddr, sizeof(SOCKADDR_IN));
 	listen(listenSocket, SOMAXCONN);
+	
+	AcceptOver accept_over;
+	cout << &accept_over << endl;
 
-	ExOver accept_over;
-	accept_over.op = OP_ACCEPT;
-	memset(&accept_over.over, 0, sizeof(accept_over.over));
-	SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-	accept_over.csocket = c_socket;
-	BOOL ret = AcceptEx(listenSocket, c_socket,
-		accept_over.packetBuf, 0, 32, 32, NULL, &accept_over.over);
-	if (FALSE == ret) {
-		int err_num = WSAGetLastError();
-		if (err_num != WSA_IO_PENDING)
-			display_error("AcceptEx Error", err_num);
-	}
+	accept_over.callback = [&](int) {
+		int acceptId = GetNewPlayerId(accept_over.cSocket);
+		if (-1 != acceptId) {
+			auto session = GetPlayer(acceptId)->GetSession();
+			CreateIoCompletionPort(
+				reinterpret_cast<HANDLE>(session->socket), hIocp, acceptId, 0);
+			CallRecv(acceptId);
+		} else {
+			closesocket(accept_over.cSocket);
+			cout << "인원 수 꽉참" << endl;
+		}
+		CallAccept(accept_over, listenSocket);
+	};
+	CallAccept(accept_over, listenSocket);
 
 	cout << "서버 열림" << endl;
 
