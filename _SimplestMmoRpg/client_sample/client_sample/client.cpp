@@ -42,14 +42,92 @@ sf::RenderWindow* g_window;
 sf::Font g_font;
 sf::Text messageText;
 
+namespace sf {
+	class TextField : public sf::Transformable, public sf::Drawable {
+	private:
+		unsigned int m_size;
+		sf::Font m_font;
+		sf::Text text;
+		std::string m_text;
+		sf::RectangleShape m_rect;
+		bool m_hasfocus;
+	public:
+		TextField(unsigned int maxChars) :
+			m_size(maxChars),
+			m_rect(sf::Vector2f(15 * m_size, 35)), // 15 pixels per char, 20 pixels height, you can tweak
+			m_hasfocus(false) {
+			m_font.loadFromFile("cour.ttf"); // I'm working on Windows, you can put your own font instead
+			m_rect.setOutlineThickness(1.3f);
+			m_rect.setFillColor(sf::Color::White);
+			m_rect.setOutlineColor(sf::Color(127, 127, 127));
+			m_rect.setPosition(this->getPosition());
+			text.setFont(m_font);
+			text.setPosition(this->getPosition());
+			text.setFillColor(sf::Color::Black);
+			text.setOutlineColor(sf::Color::White);
+			text.setOutlineThickness(1);
+		}
+		void setPosition(int x, int y) {
+			Transformable::setPosition(x, y);
+			m_rect.setPosition(this->getPosition());
+			text.setPosition(this->getPosition());
+		}
+		const std::string getText() const;
+		bool contains(sf::Vector2f point) const;
+		void setFocus(bool focus);
+		void handleInput(sf::Event e);
+		void draw(RenderTarget& target, RenderStates states) const;
+		void clear() {
+			m_text = "";
+		}
+	};
+
+	const std::string sf::TextField::getText() const {
+		return m_text;
+	}
+
+	bool sf::TextField::contains(sf::Vector2f point) const {
+		return m_rect.getGlobalBounds().contains(point);
+	}
+
+	void TextField::setFocus(bool focus) {
+		m_hasfocus = focus;
+		if (focus) {
+			m_rect.setOutlineColor(Color::Blue);
+			m_rect.setFillColor(Color(0, 0, 0, 100));
+		} else {
+			m_rect.setOutlineColor(Color(127, 127, 127)); // Gray color
+			m_rect.setFillColor(Color(0, 0, 0, 30));
+		}
+	}
+
+	void TextField::handleInput(Event e) {
+		if (!m_hasfocus || e.type != Event::TextEntered)
+			return;
+
+		if (e.text.unicode == 8) {   // Delete key
+			m_text = m_text.substr(0, m_text.size() - 1);
+		} else if (m_text.size() < m_size) {
+			m_text += e.text.unicode;
+		}
+		text.setString(m_text);
+	}
+
+	void TextField::draw(RenderTarget& target, RenderStates states) const {
+		target.draw(m_rect);
+		target.draw(text);
+	}
+}
+
 struct MessageLine {
 	string message;
 	long long print_time;
-	MessageLine(string message,	long long print_time) : message(message), print_time(print_time) {
-		
+	MessageLine(string message, long long print_time) : message(message), print_time(print_time) {
+
 	}
 };
 list<MessageLine> message_box;
+sf::TextField* textField;
 
 long long get_this_time() {
 	return static_cast<long long>(chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().
@@ -58,7 +136,7 @@ long long get_this_time() {
 
 void add_message(string message) {
 	message_box.emplace_back(message, get_this_time());
-	if(message_box.size() > 10){
+	if (message_box.size() > 10) {
 		message_box.pop_front();
 	}
 }
@@ -83,12 +161,10 @@ public:
 	OBJECT() {
 		m_showing = false;
 	}
-	void show()
-	{
+	void show() {
 		m_showing = true;
 	}
-	void hide()
-	{
+	void hide() {
 		m_showing = false;
 	}
 
@@ -113,8 +189,7 @@ public:
 		if (m_mess_end_time < chrono::system_clock::now()) {
 			m_name.setPosition(rx - 10, ry - 20);
 			g_window->draw(m_name);
-		}
-		else {
+		} else {
 			m_chat.setPosition(rx - 10, ry - 20);
 			g_window->draw(m_chat);
 		}
@@ -124,6 +199,9 @@ public:
 		m_name.setString(str);
 		m_name.setFillColor(sf::Color(255, 255, 0));
 		m_name.setStyle(sf::Text::Bold);
+	}
+	string get_name() {
+		return m_name.getString();
 	}
 	void set_chat(const char str[]) {
 		m_chat.setFont(g_font);
@@ -145,8 +223,8 @@ class Player : public OBJECT {
 	long long last_attack_time = 0;
 
 public:
-	Player(sf::Texture& t, int x, int y, int x2, int y2) : OBJECT(t,x,y,x2,y2){}
-	Player():OBJECT(){}
+	Player(sf::Texture& t, int x, int y, int x2, int y2) : OBJECT(t, x, y, x2, y2) {}
+	Player() :OBJECT() {}
 	bool attack();
 	int GetHp() { return hp; }
 	int GetLevel() { return level; }
@@ -165,8 +243,11 @@ OBJECT black_tile;
 sf::Texture* board;
 sf::Texture* pieces;
 
-void client_initialize()
-{
+OBJECT* get_player(int id) {
+	return &players[id];
+}
+
+void client_initialize() {
 	board = new sf::Texture;
 	pieces = new sf::Texture;
 	if (false == g_font.loadFromFile("cour.ttf")) {
@@ -175,6 +256,8 @@ void client_initialize()
 	}
 	board->loadFromFile("chessmap.bmp");
 	pieces->loadFromFile("chess2.png");
+	textField = new sf::TextField(MAX_STR_LEN);
+	textField->setPosition(0, 40);
 	white_tile = OBJECT{ *board, 5, 5, TILE_WIDTH, TILE_WIDTH };
 	black_tile = OBJECT{ *board, 69, 5, TILE_WIDTH, TILE_WIDTH };
 	avatar = Player{ *pieces, 128, 0, 64, 64 };
@@ -184,19 +267,15 @@ void client_initialize()
 	}
 }
 
-void client_finish()
-{
+void client_finish() {
 	delete board;
 	delete pieces;
 }
 
-void ProcessPacket(char* ptr)
-{
+void ProcessPacket(char* ptr) {
 	static bool first_time = true;
-	switch (ptr[1])
-	{
-	case S2C_LOGIN_OK:
-	{
+	switch (ptr[1]) {
+	case S2C_LOGIN_OK: {
 		s2c_login_ok* packet = reinterpret_cast<s2c_login_ok*>(ptr);
 		g_myid = packet->id;
 		avatar.m_x = packet->x;
@@ -211,8 +290,7 @@ void ProcessPacket(char* ptr)
 		avatar.show();
 	}
 	break;
-	case S2C_ADD_PLAYER:
-	{
+	case S2C_ADD_PLAYER: {
 		s2c_add_player* my_packet = reinterpret_cast<s2c_add_player*>(ptr);
 		int id = my_packet->id;
 
@@ -222,61 +300,56 @@ void ProcessPacket(char* ptr)
 			players[id].set_name(my_packet->name);
 			players[id].move(my_packet->x, my_packet->y);
 			players[id].show();
-		}
-		else {
+		} else {
 			//npc[id - NPC_START].x = my_packet->x;
 			//npc[id - NPC_START].y = my_packet->y;
 			//npc[id - NPC_START].attr |= BOB_ATTR_VISIBLE;
 		}
 		break;
 	}
-	case S2C_MOVE_PLAYER:
-	{
-		s2c_move_player * my_packet = reinterpret_cast<s2c_move_player*>(ptr);
+	case S2C_MOVE_PLAYER: {
+		s2c_move_player* my_packet = reinterpret_cast<s2c_move_player*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
 			avatar.move(my_packet->x, my_packet->y);
 			g_left_x = my_packet->x - SCREEN_WIDTH / 2;
 			g_top_y = my_packet->y - SCREEN_HEIGHT / 2;
-		}
-		else if (other_id < MAX_USER) {
+		} else if (other_id < MAX_USER) {
 			players[other_id].move(my_packet->x, my_packet->y);
-		}
-		else {
+		} else {
 			//npc[other_id - NPC_START].x = my_packet->x;
 			//npc[other_id - NPC_START].y = my_packet->y;
 		}
 		break;
 	}
 
-	case S2C_REMOVE_PLAYER:
-	{
+	case S2C_REMOVE_PLAYER: {
 		s2c_remove_player* my_packet = reinterpret_cast<s2c_remove_player*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
 			avatar.hide();
-		}
-		else if (other_id < MAX_USER) {
+		} else if (other_id < MAX_USER) {
 			players[other_id].hide();
-		}
-		else {
+		} else {
 			//		npc[other_id - NPC_START].attr &= ~BOB_ATTR_VISIBLE;
 		}
 		break;
 	}
-	case S2C_CHAT:
-	{
+	case S2C_CHAT: {
 		s2c_chat* my_packet = reinterpret_cast<s2c_chat*>(ptr);
 		int other_id = my_packet->id;
 		if (other_id == g_myid) {
 			avatar.set_chat(my_packet->message);
-		}
-		else if (other_id < MAX_USER) {
+		} else if (other_id < MAX_USER) {
 			players[other_id].set_chat(my_packet->message);
-		}
-		else {
+		} else {
 			//		npc[other_id - NPC_START].attr &= ~BOB_ATTR_VISIBLE;
 		}
+		stringstream ss;
+		ss << get_player(other_id)->get_name();
+		ss << ": ";
+		ss << my_packet->message;
+		add_message(ss.str());
 		break;
 	}
 	case SC_STAT_CHANGE: {
@@ -311,8 +384,7 @@ void ProcessPacket(char* ptr)
 	}
 }
 
-void process_data(char* net_buf, size_t io_byte)
-{
+void process_data(char* net_buf, size_t io_byte) {
 	char* ptr = net_buf;
 	static size_t in_packet_size = 0;
 	static size_t saved_packet_size = 0;
@@ -327,8 +399,7 @@ void process_data(char* net_buf, size_t io_byte)
 			io_byte -= in_packet_size - saved_packet_size;
 			in_packet_size = 0;
 			saved_packet_size = 0;
-		}
-		else {
+		} else {
 			memcpy(packet_buffer + saved_packet_size, ptr, io_byte);
 			saved_packet_size += io_byte;
 			io_byte = 0;
@@ -336,14 +407,12 @@ void process_data(char* net_buf, size_t io_byte)
 	}
 }
 
-void client_main()
-{
+void client_main() {
 	char net_buf[BUF_SIZE];
 	size_t	received;
 
 	auto recv_result = socket.receive(net_buf, BUF_SIZE, received);
-	if (recv_result == sf::Socket::Error)
-	{
+	if (recv_result == sf::Socket::Error) {
 		wcout << L"Recv ¿¡·¯!";
 		while (true);
 	}
@@ -351,17 +420,14 @@ void client_main()
 		if (received > 0) process_data(net_buf, received);
 
 	for (int i = 0; i < SCREEN_WIDTH; ++i)
-		for (int j = 0; j < SCREEN_HEIGHT; ++j)
-		{
-			int tile_x = i +  g_left_x;
-			int tile_y = j +  g_top_y;
+		for (int j = 0; j < SCREEN_HEIGHT; ++j) {
+			int tile_x = i + g_left_x;
+			int tile_y = j + g_top_y;
 			if ((tile_x < 0) || (tile_y < 0)) continue;
-			if ((((tile_x / 3)  + (tile_y / 3)) % 2) == 1) {
+			if ((((tile_x / 3) + (tile_y / 3)) % 2) == 1) {
 				white_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
 				white_tile.a_draw();
-			}
-			else
-			{
+			} else {
 				black_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
 				black_tile.a_draw();
 			}
@@ -370,21 +436,27 @@ void client_main()
 	for (auto& pl : players) pl.draw();
 	sf::Text text;
 	text.setFont(g_font);
+	text.setPosition(0, 0);
+	text.setFillColor(sf::Color::Black);
+	text.setOutlineColor(sf::Color::White);
+	text.setOutlineThickness(1);
 	char buf[100];
 	sprintf_s(buf, "(%d, %d) hp %d  lvl %d  exp %d", avatar.m_x, avatar.m_y, avatar.GetHp(), avatar.GetLevel(), avatar.GetExp());
 	text.setString(buf);
 	g_window->draw(text);
 	auto pos = text.getPosition();
-	for (auto message_line : message_box){
+	pos.y += 30;
+	for (auto message_line : message_box) {
 		pos.y += 30;
 		text.setPosition(pos.x, pos.y);
 		text.setString(message_line.message.c_str());
 		g_window->draw(text);
 	}
+
+	g_window->draw(*textField);
 }
 
-void send_move_packet(DIRECTION dr)
-{
+void send_move_packet(DIRECTION dr) {
 	c2s_move packet;
 	packet.size = sizeof(packet);
 	packet.type = C2S_MOVE;
@@ -394,8 +466,7 @@ void send_move_packet(DIRECTION dr)
 	socket.send(&packet, sizeof(packet), sent);
 }
 
-void send_login_packet(string &name)
-{
+void send_login_packet(string& name) {
 	c2s_login packet;
 	packet.size = sizeof(packet);
 	packet.type = C2S_LOGIN;
@@ -412,6 +483,20 @@ void send_attack_packet() {
 	socket.send(&packet, sizeof(packet), sent);
 }
 
+void send_chat_packet(const string& mess) {
+	cs_packet_chat packet;
+	packet.size = sizeof(packet);
+	packet.type = CS_CHAT;
+	strcpy_s(packet.message, mess.c_str());
+	size_t sent = 0;
+	socket.send(&packet, sizeof(packet), sent);
+	stringstream ss;
+	ss << avatar.get_name();
+	ss << ": ";
+	ss << mess;
+	add_message(ss.str());
+}
+
 bool Player::attack() {
 	auto now = get_this_time();
 	if (now - last_attack_time >= 1000) {
@@ -422,8 +507,7 @@ bool Player::attack() {
 	return false;
 }
 
-int main()
-{
+int main() {
 	wcout.imbue(locale("korean"));
 	sf::Socket::Status status = socket.connect("127.0.0.1", SERVER_PORT);
 
@@ -441,19 +525,17 @@ int main()
 		(chrono::system_clock::now().
 			time_since_epoch()).count();
 	name += to_string(tt % 1000);
-	send_login_packet(name);	
+	send_login_packet(name);
 	avatar.set_name(name.c_str());
 	sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "2D CLIENT");
 	g_window = &window;
 
-	while (window.isOpen())
-	{
+	while (window.isOpen()) {
 		sf::Event event;
-		while (window.pollEvent(event))
-		{
+		while (window.pollEvent(event)) {
 			if (event.type == sf::Event::Closed)
 				window.close();
-			if (event.type == sf::Event::KeyPressed) {
+			else if (event.type == sf::Event::KeyPressed) {
 				DIRECTION p_type = D_NO;
 				switch (event.key.code) {
 				case sf::Keyboard::Left:
@@ -472,11 +554,24 @@ int main()
 					avatar.attack();
 					break;
 				}
+				case sf::Keyboard::Enter: {
+					send_chat_packet(textField->getText());
+					textField->clear();
+					break;
+				}
 				case sf::Keyboard::Escape:
 					window.close();
 					break;
 				}
 				if (D_NO != p_type) send_move_packet(p_type);
+			} else if (event.type == sf::Event::MouseButtonReleased) {
+				auto pos = sf::Mouse::getPosition(window);
+				textField->setFocus(false);
+				if (textField->contains(sf::Vector2f(pos))) {
+					textField->setFocus(true);
+				}
+			} else {
+				textField->handleInput(event);
 			}
 		}
 

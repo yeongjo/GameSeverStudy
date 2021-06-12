@@ -8,17 +8,21 @@ my_exp = 0
 my_damage = 0
 my_is_initialized = false
 
-function set_uid(x)
+function SetId(x)
 	myid = x
-	my_init_x = API_get_x(myid)
-	my_init_y = API_get_y(myid)
-	reset()
+	my_init_x = LuaGetX(myid)
+	my_init_y = LuaGetY(myid)
+	InitStat()
 end
 
-function reset()
+function Reset()
 	m_x = my_init_x
 	m_y = my_init_y
-	API_set_pos(myid, m_x, m_y)
+	LuaSetPos(myid, m_x, m_y)
+	InitStat()
+end
+
+function InitStat()
 	agro_distance = 11
 	my_hp = 2
 	my_level = 1
@@ -26,26 +30,26 @@ function reset()
 	my_damage = 1
 end
 
-function distance(x1, y1, x2, y2)
+function Distance(x1, y1, x2, y2)
 	x = x1 - x2
 	y = y1 - y2
 	return math.sqrt(x*x+y*y)
 end
 
-function tick(actor_id_array)
-	m_x = API_get_x(myid)
-	m_y = API_get_y(myid)
-	--API_print("CALL tick: "..m_x..","..m_y.."\n")
+function Tick(actor_id_array)
+	m_x = LuaGetX(myid)
+	m_y = LuaGetY(myid)
+	--LuaPrint("CALL tick: "..m_x..","..m_y.."\n")
 	min_distance = agro_distance
 	min_distance_actor_x = -1
 	min_distance_actor_y = -1
 	for i = 1, #actor_id_array do
 		local actor_id = actor_id_array[i]
-		--API_print("tick loop["..i)
-		--API_print("]: "..actor_id.."\n")
-		actor_x = API_get_x(actor_id)
-		actor_y = API_get_y(actor_id)
-		cur_distance = distance(m_x, m_y, actor_x, actor_y)
+		--LuaPrint("tick loop["..i)
+		--LuaPrint("]: "..actor_id.."\n")
+		actor_x = LuaGetX(actor_id)
+		actor_y = LuaGetY(actor_id)
+		cur_distance = Distance(m_x, m_y, actor_x, actor_y)
 		if(min_distance > cur_distance) then
 			min_distance = cur_distance
 			min_distance_actor_x = actor_x
@@ -55,7 +59,7 @@ function tick(actor_id_array)
 	if(min_distance_actor_x == -1 or min_distance_actor_y == -1) then
 		return
 	end
-	--API_print("center: "..min_distance_actor_x..","..m_x.."/"..min_distance_actor_y..","..m_y.."\n")
+	--LuaPrint("center: "..min_distance_actor_x..","..m_x.."/"..min_distance_actor_y..","..m_y.."\n")
 	if(min_distance_actor_x - m_x > 0) then
 		m_x = m_x+1
 	elseif(min_distance_actor_x - m_x < 0) then
@@ -65,54 +69,54 @@ function tick(actor_id_array)
 	elseif(min_distance_actor_y - m_y < 0) then
 		m_y = m_y-1
 	end
-	--API_print("after tick: "..m_x..","..m_y.."\n")
-	API_set_pos(myid, m_x, m_y)
+	--LuaPrint("after tick: "..m_x..","..m_y.."\n")
+	LuaSetPos(myid, m_x, m_y)
 end
 
-function on_near_actor_with_player_move(p_id)
+function OnNearActorWithPlayerMove(p_id)
 end
 
-function on_near_actor_with_self_move(p_id)
-	p_x = API_get_x(p_id)
-	p_y = API_get_y(p_id)
-	my_x = API_get_x(myid)
-	my_y = API_get_y(myid)
+function OnNearActorWithSelfMove(p_id)
+	p_x = LuaGetX(p_id)
+	p_y = LuaGetY(p_id)
+	my_x = LuaGetX(myid)
+	my_y = LuaGetY(myid)
 
 	if(p_x == my_x) then
-		--API_print(tostring(p_y)..", "..tostring(my_y).."\n")
+		--LuaPrint(tostring(p_y)..", "..tostring(my_y).."\n")
 		if(p_y == my_y) then
-			API_take_damage(p_id, myid)
+			LuaTakeDamage(p_id, myid)
 		end
 	end
 end
 
-function take_damage(p_id, damage)
+function TakeDamage(p_id, damage)
 	
 	result = true
 	my_hp = my_hp - damage
 	if(my_hp <= 0) then
 		my_hp = 0
-		p_hp = API_get_hp(p_id)
-		p_level = API_get_level(p_id)
-		p_exp = API_get_exp(p_id)
+		p_hp = LauGetHp(p_id)
+		p_level = LuaGetLevel(p_id)
+		p_exp = LuaGetExp(p_id)
 		p_exp = p_exp + my_exp
-		API_send_stat_change(p_id, p_hp, p_level, p_exp); -- °æÇèÄ¡ ½Àµæ
+		LuaSendStatChange(p_id, myid, p_hp, p_level, p_exp); -- °æÇèÄ¡ ½Àµæ
 		result = false
 	end
-	API_print("take_damage("..p_id..":"..damage..","..my_hp..")\n")
-	API_send_stat_change(myid, my_hp, my_level, my_exp);
+	LuaPrint("take_damage("..p_id..":"..damage..","..my_hp..")\n")
+	LuaSendStatChange(myid, myid, my_hp, my_level, my_exp);
 	return result
 end
 
-function get_hp()
+function GetHp()
 	return my_hp
 end
-function get_level()
+function GetLevel()
 	return my_level
 end
-function get_exp()
+function GetExp()
 	return my_exp
 end
-function get_damage()
+function GetDamage()
 	return my_damage
 end

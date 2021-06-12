@@ -60,6 +60,7 @@ extern "C" {
 #define DISPLAYLOG
 //#define PLAYERLOG
 //#define NPCLOG
+#define PLAYER_NOT_RANDOM_SPAWN
 mutex coutMutex;
 
 #pragma comment(lib, "lua54.lib")
@@ -429,7 +430,7 @@ Player* GetPlayer(int id) {
 struct Actor {
 	int		id;
 	char name[MAX_NAME];
-	short	x, y;
+	short	x, y, initX, initY;
 	int		moveTime;
 
 	atomic_bool isActive;
@@ -455,12 +456,6 @@ struct Actor {
 	/// </summary>
 	unordered_set<int> viewSet;
 	mutex   viewSetLock;
-	
-	/// <summary>
-	/// luaLock으로 잠궈주고 사용
-	/// </summary>
-	lua_State* L;		// Npc만 사용
-	mutex luaLock;		// Npc만 사용
 
 protected:
 	Actor(int id) {
@@ -470,7 +465,27 @@ protected:
 
 public:
 
-	virtual void Init() {}
+	virtual void Init() {
+		initX = x;
+		initY = y;
+		isActive = false;
+	}
+
+	void InitSector() const {
+		auto sectorViewFrustumX = x / WORLD_SECTOR_SIZE;
+		auto sectorViewFrustumY = y / WORLD_SECTOR_SIZE;
+		auto& sector = world_sector[sectorViewFrustumY][sectorViewFrustumX];
+		lock_guard<mutex> lock(sector.sectorLock);
+		sector.sector.insert(id);
+	}
+
+	void RemoveFromSector() const {
+		auto sectorViewFrustumX = x / WORLD_SECTOR_SIZE;
+		auto sectorViewFrustumY = y / WORLD_SECTOR_SIZE;
+		auto& sector = world_sector[sectorViewFrustumY][sectorViewFrustumX];
+		lock_guard<mutex> lock(sector.sectorLock);
+		sector.sector.erase(id);
+	}
 
 	virtual void Update() {}
 
@@ -490,6 +505,8 @@ public:
 	virtual void RemoveFromViewSet(int otherId); // TODO 나중에 RemoveAll 만들어야 lock으로 생긴 느려지는거 줄어듬
 
 	virtual void Die();
+
+	virtual void RemoveFromAll();
 
 	virtual void SendStatChange();
 
@@ -535,149 +552,6 @@ bool IsNpc(int id) {
 
 void AddSendingData(int targetId, void* buf);
 
-void send_chat(int receiverId, int senderId, const char* mess) {
-	sc_packet_chat p;
-	p.id = senderId;
-	p.size = sizeof(p);
-	p.type = SC_CHAT;
-	strcpy_s(p.message, mess);
-	AddSendingData(receiverId, &p);
-}
-
-void send_move_packet(int c_id, int p_id) {
-	sc_packet_position p;
-	p.id = p_id;
-	p.size = sizeof(p);
-	p.type = SC_POSITION;
-	auto actor = GetActor(p_id);
-	p.x = actor->x;
-	p.y = actor->y;
-	p.move_time = actor->moveTime;
-	AddSendingData(c_id, &p);
-}
-
-void send_add_object(int targetId, int addedId) {
-	sc_packet_add_object p;
-	p.id = addedId;
-	p.size = sizeof(p);
-	p.type = SC_ADD_OBJECT;
-	auto actor = GetActor(addedId);
-	p.x = actor->x;
-	p.y = actor->y;
-	p.obj_class = 1;
-	p.HP = 1;
-	p.LEVEL = 1;
-	p.EXP = 1;
-	strcpy_s(p.name, actor->name);
-	AddSendingData(targetId, &p);
-}
-
-void send_remove_object(int receiverId, int removeTargetId) {
-	sc_packet_remove_object p;
-	p.id = removeTargetId;
-	p.size = sizeof(p);
-	p.type = SC_REMOVE_OBJECT;
-	AddSendingData(receiverId, &p);
-}
-
-void send_stat_change(int receiverId, int statChangedId, int hp, int level, int exp) {
-	sc_packet_stat_change p;
-	p.id = statChangedId;
-	p.size = sizeof(p);
-	p.type = SC_STAT_CHANGE;
-	p.HP = hp;
-	p.LEVEL = level;
-	p.EXP = exp;
-	AddSendingData(receiverId, &p);
-}
-
-int API_take_damage(lua_State* L) {
-	int obj_id = lua_tonumber(L, -2);
-	int attackerId = lua_tonumber(L, -1);
-	lua_pop(L, 3);
-	GetActor(obj_id)->TakeDamage(attackerId);
-	return 1;
-}
-
-int API_get_x(lua_State* L) {
-	int obj_id = lua_tonumber(L, -1);
-	lua_pop(L, 2);
-	int x = GetActor(obj_id)->x;
-	lua_pushnumber(L, x);
-	return 1;
-}
-int API_get_y(lua_State* L) {
-	int obj_id = lua_tonumber(L, -1);
-	lua_pop(L, 2);
-	int y = GetActor(obj_id)->y;
-	lua_pushnumber(L, y);
-	return 1;
-}
-
-int API_set_pos(lua_State* L) {
-	int obj_id = lua_tonumber(L, -3);
-	int x = lua_tonumber(L, -2);
-	int y = lua_tonumber(L, -1);
-	lua_pop(L, 3);
-	GetActor(obj_id)->SetPos(x, y);
-	return 1;
-}
-
-int API_send_mess(lua_State* L) {
-	int recverId = lua_tonumber(L, -3);
-	int senderId = lua_tonumber(L, -2);
-	const char* mess = lua_tostring(L, -1);
-	lua_pop(L, 4);
-	send_chat(recverId, senderId, mess);
-	return 1;
-}
-int API_get_hp(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
-	lua_pop(L, 2);
-	lua_pushinteger(L, GetActor(targetId)->GetHp());
-	return 1;
-}
-int API_get_level(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
-	lua_pop(L, 2);
-	lua_pushinteger(L, GetActor(targetId)->GetLevel());
-	return 1;
-}
-int API_get_exp(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
-	lua_pop(L, 2);
-	lua_pushinteger(L, GetActor(targetId)->GetExp());
-	return 1;
-}
-int API_send_stat_change(lua_State* L);
-int API_print(lua_State* L) {
-	const char* mess = lua_tostring(L, -1);
-	lua_pop(L, 2);
-	cout << mess;
-	return 1;
-}
-
-int API_add_event_npc_random_move(lua_State* L) {
-	int p_id = lua_tonumber(L, -2);
-	int delay = lua_tonumber(L, -1);
-	lua_pop(L, 3);
-	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
-		GetActor(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
-	});
-	return 1;
-}
-
-int API_add_event_send_mess(lua_State* L) {
-	int recverId = lua_tonumber(L, -4);
-	int senderId = lua_tonumber(L, -3);
-	const char* mess = lua_tostring(L, -2);
-	int delay = lua_tonumber(L, -1);
-	lua_pop(L, 5);
-	TimerQueueManager::Add(recverId, delay, nullptr, [=](int size) {
-		send_chat(recverId, senderId, mess);
-		});
-	return 1;
-}
 void UpdateSector(int actorId, int prevX, int prevY, int x, int y);
 
 bool CallLuaFunction(lua_State* L, int argCount, int resultCount) {
@@ -692,10 +566,10 @@ bool CallLuaFunction(lua_State* L, int argCount, int resultCount) {
 
 class Player : public Actor {
 protected:
-	int hp = 10;
-	int level = 1;
-	int exp = 0;
-	int damage = 1;
+	int hp, maxHp = 5;
+	int level;
+	int exp;
+	int damage;
 	vector<int> attackViewList;
 	Session session;	// 플레이어와 같은 세션 접속 유저만 사용
 	
@@ -705,9 +579,49 @@ public:
 	static Player* Get(int id) {
 		return new Player(id);
 	}
+	
+	static int GetNewId(SOCKET socket) {
+		for (int i = 1; i <= MAX_PLAYER; ++i) {
+			auto actor = GetPlayer(i);
+			auto session = actor->GetSession();
+			if (PLST_FREE == session->state) {
+				session->state = PLST_CONNECTED;
+				lock_guard<mutex> lg{ session->socketLock };
+				session->socket = socket;
+				actor->name[0] = 0;
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	void Init() override {
+		Actor::Init();
+		hp = maxHp;
+		level = 1;
+		exp = 0;
+		damage = 1;
+	}
+	
 	void Move(DIRECTION dir) override;
 	void SetPos(int x, int y) override;
 	void SendStatChange() override;
+
+	virtual void Disconnect() {
+		auto actor = GetPlayer(id);
+		if (session.state == PLST_FREE) {
+			return;
+		}
+		session.state = PLST_FREE;
+		closesocket(session.socket);
+
+		{
+			lock_guard<mutex> lock(session.recvedBufLock);
+			session.recvedBuf.clear();
+		}
+		session.bufOverManager.ClearSendingData();
+		actor->RemoveFromAll();
+	}
 
 	virtual void Attack() {
 		viewSetLock.lock();
@@ -728,12 +642,21 @@ public:
 
 	bool TakeDamage(int attackerId) override;
 
+	void Die() override {
+		//Actor::Die();
+		//SendRemoveActor(id, id); // 삭제는 안하고 위치 옮기고 경험치 반 HP 회복해서 시작위치로
+		SetPos(initX, initY);
+		hp = maxHp;
+		exp = exp >> 1;
+		SendStatChange();
+	}
+
 	void AddToViewSet(int otherId) override {
 		viewSetLock.lock();
 		if (0 == viewSet.count(id)) {
 			viewSet.insert(otherId);
 			viewSetLock.unlock();
-			send_add_object(id, otherId);
+			SendAddActor(otherId);
 			return;
 		}
 		viewSetLock.unlock();
@@ -744,11 +667,69 @@ public:
 		if (0 != viewSet.count(otherId)) {
 			viewSet.erase(otherId);
 			viewSetLock.unlock();
-			send_remove_object(id, otherId);
+			SendRemoveActor(otherId);
 			return;
 		}
 		viewSetLock.unlock();
 	}
+
+	void SendChat(int senderId, const char* mess) {
+		sc_packet_chat p;
+		p.id = senderId;
+		p.size = sizeof(p);
+		p.type = SC_CHAT;
+		strcpy_s(p.message, mess);
+		AddSendingData(id, &p);
+	}
+
+	void SendMove(int p_id) {
+		sc_packet_position p;
+		p.id = p_id;
+		p.size = sizeof(p);
+		p.type = SC_POSITION;
+		auto actor = GetActor(p_id);
+		p.x = actor->x;
+		p.y = actor->y;
+		p.move_time = actor->moveTime;
+		AddSendingData(id, &p);
+	}
+
+	void SendAddActor(int addedId) {
+		sc_packet_add_object p;
+		p.id = addedId;
+		p.size = sizeof(p);
+		p.type = SC_ADD_OBJECT;
+		auto actor = GetActor(addedId);
+		p.x = actor->x;
+		p.y = actor->y;
+		p.obj_class = 1;
+		p.HP = 1;
+		p.LEVEL = 1;
+		p.EXP = 1;
+		strcpy_s(p.name, actor->name);
+		AddSendingData(id, &p);
+	}
+
+	void SendRemoveActor(int removeTargetId) {
+		sc_packet_remove_object p;
+		p.id = removeTargetId;
+		p.size = sizeof(p);
+		p.type = SC_REMOVE_OBJECT;
+		AddSendingData(id, &p);
+	}
+
+	void SendChangedStat(int statChangedId, int hp, int level, int exp) {
+		sc_packet_stat_change p;
+		p.id = statChangedId;
+		p.size = sizeof(p);
+		p.type = SC_STAT_CHANGE;
+		p.HP = hp;
+		p.LEVEL = level;
+		p.EXP = exp;
+		AddSendingData(id, &p);
+	}
+	
+	void CallRecv() const;
 
 	MiniOver* GetOver() override {
 		return session.bufOverManager.Get();
@@ -758,9 +739,26 @@ public:
 	int GetLevel() override { return level; }
 	int GetExp() override { return exp; }
 	int GetDamage() override { return damage; }
-	void SetExp(int exp) override { this->exp = exp; }
+	void SetExp(int exp) override {
+		auto level = GetLevel();
+		auto levelMinusOne = GetLevel() - 1;
+		auto requireExp = levelMinusOne * 100 + 100;
+		if(requireExp < exp){
+			SetLevel(GetLevel() + 1);
+			exp -= requireExp;
+		}
+		this->exp = exp;
+		SendStatChange();
+	}
 	void SetLevel(int level) override { this->level = level; }
 	void SetHp(int hp) override { this->hp = hp; }
+
+private:
+	/// <summary>
+	/// 한 스레드에서만 호출안되기때문에 lock 안걸어도됨
+	/// </summary>
+	/// <param name="id"></param>
+	void ProcessPacket(unsigned char* buf);
 };
 
 void send_login_ok_packet(int targetId) {
@@ -780,131 +778,236 @@ void send_login_ok_packet(int targetId) {
 class NonPlayer : public Actor {
 	MiniOver miniOver;	// Npc ID로 PostQueuedCompletionStatus 호출할때 사용
 protected:
-	NonPlayer(int id) : Actor(id) {}
+	/// <summary>
+	/// luaLock으로 잠궈주고 사용
+	/// </summary>
+	lua_State* L;		// Npc만 사용
+	mutex luaLock;		// Npc만 사용
 	
-	void InitLua(const char* path) {
-		L = luaL_newstate();
-		luaL_openlibs(L);
-		luaL_loadfile(L, path);
-		CallLuaFunction(L, 0, 0);
-		
-		lua_register(L, "API_set_pos", API_set_pos);
-		lua_register(L, "API_get_x", API_get_x);
-		lua_register(L, "API_get_y", API_get_y);
-		lua_register(L, "API_send_mess", API_send_mess);
-		lua_register(L, "API_send_stat_change", API_send_stat_change);
-		lua_register(L, "API_get_hp", API_get_hp);
-		lua_register(L, "API_get_level", API_get_level);
-		lua_register(L, "API_get_exp", API_get_exp);
-		lua_register(L, "API_take_damage", API_take_damage);
-		lua_register(L, "API_print", API_print);
-		lua_register(L, "API_add_event_npc_random_move", API_add_event_npc_random_move);
-		lua_register(L, "API_add_event_send_mess", API_add_event_send_mess);
+	NonPlayer(int id) : Actor(id) {}
 
-		lua_getglobal(L, "set_uid");
-		lua_pushnumber(L, id);
-		CallLuaFunction(L, 1, 0);
-
-	}
+	void InitLua(const char* path);
 
 	void Init() override {
+		Actor::Init();
 		moveTime = 0;
-		isActive = false;
 		memset(&miniOver.over, 0, sizeof(miniOver.over));
 		InitSector();
 	}
 
 	void OnNearActorWithPlayerMove(int actorId) override {
 		lock_guard<mutex> lock(luaLock);
-		lua_getglobal(L, "on_near_actor_with_player_move");
+		lua_getglobal(L, "OnNearActorWithPlayerMove");
 		lua_pushnumber(L, actorId);
 		CallLuaFunction(L, 1, 0);
 	}
-
+	
 	void OnNearActorWithSelfMove(int actorId) override {
 		lock_guard<mutex> lock(luaLock);
-		lua_getglobal(L, "on_near_actor_with_self_move");
+		lua_getglobal(L, "OnNearActorWithSelfMove");
 		lua_pushnumber(L, actorId);
 		CallLuaFunction(L, 1, 0);
 	}
 
 	bool TakeDamage(int attackerId) override {
 		lock_guard<mutex> lock(luaLock);
-		lua_getglobal(L, "take_damage");
+		lua_getglobal(L, "TakeDamage");
 		lua_pushinteger(L, attackerId);
 		lua_pushinteger(L, GetActor(attackerId)->GetDamage());
-		CallLuaFunction(L, 2, 0);
+		CallLuaFunction(L, 2, 1);
 		auto result = lua_toboolean(L, -1);
 		lua_pop(L, 1);
 		return result;
 	}
 
+	void AddToViewSet(int otherId) override;
+
 	void Die() override;
 
 	void SetPos(int x, int y) override;
 	MiniOver* GetOver() override {
+		memset(&miniOver.over, 0, sizeof(miniOver.over));
 		return &miniOver;
 	}
-	int GetHp() override {
-		lua_getglobal(L, "get_hp");
+	int GetHpWithoutLock() const {
+		lua_getglobal(L, "GetHp");
 		CallLuaFunction(L, 0, 1);
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
+	}
+	int GetLevelWithoutLock() const {
+		lua_getglobal(L, "GetLevel");
+		CallLuaFunction(L, 0, 1);
+		int value = lua_tonumber(L, -1);
+		lua_pop(L, 1);
+		return value;
+	}
+	int GetExpWithoutLock() const {
+		lua_getglobal(L, "GetExp");
+		CallLuaFunction(L, 0, 1);
+		int value = lua_tonumber(L, -1);
+		lua_pop(L, 1);
+		return value;
+	}
+	int GetHp() override {
+		lock_guard<mutex> lock(luaLock);
+		return GetHpWithoutLock();
 	}
 	int GetLevel() override {
-		lua_getglobal(L, "get_level");
-		CallLuaFunction(L, 0, 1);
-		int value = lua_tonumber(L, -1);
-		lua_pop(L, 1);
-		return value;
+		lock_guard<mutex> lock(luaLock);
+		return GetLevelWithoutLock();
 	}
 	int GetExp() override {
-		lua_getglobal(L, "get_exp");
-		CallLuaFunction(L, 0, 1);
-		int value = lua_tonumber(L, -1);
-		lua_pop(L, 1);
-		return value;
+		lock_guard<mutex> lock(luaLock);
+		return GetExpWithoutLock();
 	}
 	int GetDamage() override {
-		lua_getglobal(L, "get_damage");
+		lock_guard<mutex> lock(luaLock);
+		lua_getglobal(L, "GetDamage");
 		CallLuaFunction(L, 0, 1);
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
 	}
 	void SetExp(int exp) override {
+		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, exp);
 		lua_setglobal(L, "my_exp");
 	}
 	void SetLevel(int level) override {
+		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, level);
 		lua_setglobal(L, "my_level");
 	}
 	void SetHp(int hp) override {
+		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, hp);
 		lua_setglobal(L, "my_hp");
 	}
 private:
-	void InitSector() {
-		auto sectorViewFrustumX = x / WORLD_SECTOR_SIZE;
-		auto sectorViewFrustumY = y / WORLD_SECTOR_SIZE;
-		world_sector[sectorViewFrustumY][sectorViewFrustumX].sector.insert(id);
+	void SendStatChange() override {
+		{
+			lock_guard<mutex> lock(viewSetLock);
+			for (auto viewId : viewSet) {
+				_ASSERT(viewId != id);
+				if (IsNpc(viewId)) {
+					continue;
+				}
+				GetPlayer(viewId)->SendChangedStat(id, GetHpWithoutLock(), GetLevelWithoutLock(), GetExpWithoutLock());
+			}
+		}
+		if (GetHpWithoutLock() == 0) {
+			TimerQueueManager::Add(id, 1, nullptr, [this](int) {
+				Die();
+				});
+		}
 	}
 };
+
+int LuaAddEventSendMess(lua_State* L) {
+	int recverId = lua_tonumber(L, -4);
+	int senderId = lua_tonumber(L, -3);
+	const char* mess = lua_tostring(L, -2);
+	int delay = lua_tonumber(L, -1);
+	lua_pop(L, 5);
+	TimerQueueManager::Add(recverId, delay, nullptr, [=](int size) {
+		GetPlayer(recverId)->SendChat(senderId, mess);
+		});
+	return 1;
+}
+
+int LuaTakeDamage(lua_State* L) {
+	int obj_id = lua_tonumber(L, -2);
+	int attackerId = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	GetActor(obj_id)->TakeDamage(attackerId);
+	return 1;
+}
+
+int LuaGetX(lua_State* L) {
+	int obj_id = lua_tonumber(L, -1);
+	lua_pop(L, 2);
+	int x = GetActor(obj_id)->x;
+	lua_pushnumber(L, x);
+	return 1;
+}
+int LuaGetY(lua_State* L) {
+	int obj_id = lua_tonumber(L, -1);
+	lua_pop(L, 2);
+	int y = GetActor(obj_id)->y;
+	lua_pushnumber(L, y);
+	return 1;
+}
+
+int LuaSetPos(lua_State* L) {
+	int obj_id = lua_tonumber(L, -3);
+	int x = lua_tonumber(L, -2);
+	int y = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	GetActor(obj_id)->SetPos(x, y);
+	return 1;
+}
+
+int LuaSendMess(lua_State* L) {
+	int recverId = lua_tonumber(L, -3);
+	int senderId = lua_tonumber(L, -2);
+	const char* mess = lua_tostring(L, -1);
+	lua_pop(L, 4);
+	GetPlayer(recverId)->SendChat(senderId, mess);
+	return 1;
+}
+int LauGetHp(lua_State* L) {
+	int targetId = lua_tonumber(L, -1);
+	lua_pop(L, 2);
+	lua_pushinteger(L, GetActor(targetId)->GetHp());
+	return 1;
+}
+int LuaGetLevel(lua_State* L) {
+	int targetId = lua_tonumber(L, -1);
+	lua_pop(L, 2);
+	lua_pushinteger(L, GetActor(targetId)->GetLevel());
+	return 1;
+}
+int LuaGetExp(lua_State* L) {
+	int targetId = lua_tonumber(L, -1);
+	lua_pop(L, 2);
+	lua_pushinteger(L, GetActor(targetId)->GetExp());
+	return 1;
+}
+int LuaSendStatChange(lua_State* L);
+int LuaPrint(lua_State* L) {
+	const char* mess = lua_tostring(L, -1);
+	lua_pop(L, 2);
+	cout << mess;
+	return 1;
+}
+
+int LuaAddEventNpcRandomMove(lua_State* L) {
+	int p_id = lua_tonumber(L, -2);
+	int delay = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
+		GetActor(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
+		});
+	return 1;
+}
 
 class Npc : public NonPlayer {
 protected:
 	Npc(int id) : NonPlayer(id) {
+	}
+public:
+	static Npc* Get(int id) {
+		return new Npc(id);
+	}
+
+	void Init() override {
 		sprintf_s(name, "N%d", id);
 		x = rand() % WORLD_WIDTH;
 		y = rand() % WORLD_HEIGHT;
 		NonPlayer::Init();
 		InitLua("npc.lua");
-	}
-public:
-	static Npc* Get(int id) {
-		return new Npc(id);
 	}
 
 	void Update() override;
@@ -914,15 +1017,18 @@ public:
 class Monster : public NonPlayer {
 protected:
 	Monster(int id) : NonPlayer(id) {
+	}
+public:
+	static Monster* Get(int id) {
+		return new Monster(id);
+	}
+
+	void Init() override {
 		sprintf_s(name, "M%d", id);
 		x = rand() % WORLD_WIDTH;
 		y = rand() % WORLD_HEIGHT;
 		NonPlayer::Init();
 		InitLua("Monster.lua");
-	}
-public:
-	static Monster* Get(int id) {
-		return new Monster(id);
 	}
 
 	void Update() override;
@@ -932,8 +1038,6 @@ public:
 
 	}
 };
-
-void Disconnect(int playerId);
 
 void display_error(const char* msg, int errNum) {
 #ifdef DISPLAYLOG
@@ -958,16 +1062,19 @@ void AddSendingData(int targetId, void* buf) {
 	manager.AddSendingData(buf);
 }
 
-int API_send_stat_change(lua_State* L) {
-	int targetId = lua_tonumber(L, -4);
+int LuaSendStatChange(lua_State* L) {
+	int targetId = lua_tonumber(L, -5);
+	int orderId = lua_tonumber(L, -4);
 	int hp = lua_tonumber(L, -3);
 	int level = lua_tonumber(L, -2);
 	int exp = lua_tonumber(L, -1);
 	lua_pop(L, 5);
 	auto actor = GetActor(targetId);
-	actor->SetHp(hp);
-	actor->SetLevel(level);
-	actor->SetExp(exp);
+	if(orderId != targetId){ // 자기 자신건 변경 할 필요없다. 그리고 변경하려하면 락이 문제가 됨
+		actor->SetHp(hp);
+		actor->SetLevel(level);
+		actor->SetExp(exp);
+	}
 	actor->SendStatChange();
 	return 1;
 }
@@ -1010,7 +1117,7 @@ void BufOverManager::SendAddedData(int playerId) {
 			auto err = WSAGetLastError();
 			if (WSA_IO_PENDING != err) {
 				display_error("WSASend : ", WSAGetLastError());
-				Disconnect(playerId);
+				GetPlayer(playerId)->Disconnect();
 				return;
 			}
 		}
@@ -1028,13 +1135,14 @@ void TimerQueueManager::Do() {
 			TimerEvent ev = timerQueue.top();
 			timerQueue.pop();
 			timerLock.unlock();
-			if (ev.checkCondition != nullptr && !ev.checkCondition()){
+			auto actor = GetActor(ev.object);
+			if (!actor->isActive ||
+				(ev.checkCondition != nullptr && !ev.checkCondition())){
 				continue;
 			}
 
-			auto over = GetActor(ev.object)->GetOver();
+			auto over = actor->GetOver();
 			over->callback = ev.callback;
-			memset(&over->over, 0, sizeof(over->over));
 			PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
 		}
 		else{
@@ -1042,37 +1150,6 @@ void TimerQueueManager::Do() {
 			this_thread::sleep_for(10ms);
 		}
 	}
-}
-
-void CallRecv(int key) {
-	auto session = GetPlayer(key)->GetSession();
-	auto& recvOver = session->recvOver;
-	recvOver.wsabuf[0].buf =
-		reinterpret_cast<char*>(recvOver.packetBuf);
-	recvOver.wsabuf[0].len = MAX_BUFFER;
-	memset(&recvOver.over, 0, sizeof(recvOver.over));
-	DWORD r_flag = 0;
-	int ret = WSARecv(session->socket, recvOver.wsabuf, 1, NULL, &r_flag, &recvOver.over, NULL);
-	if (0 != ret) {
-		int err_no = WSAGetLastError();
-		if (WSA_IO_PENDING != err_no)
-			display_error("WSARecv : ", WSAGetLastError());
-	}
-}
-
-int GetNewPlayerId(SOCKET socket) {
-	for (int i = 1; i <= MAX_PLAYER; ++i) {
-		auto actor = GetPlayer(i);
-		auto session = actor->GetSession();
-		if (PLST_FREE == session->state) {
-			session->state = PLST_CONNECTED;
-			lock_guard<mutex> lg{ session->socketLock };
-			session->socket = socket;
-			actor->name[0] = 0;
-			return i;
-		}
-	}
-	return -1;
 }
 
 bool CanSee(int id1, int id2) {
@@ -1126,11 +1203,11 @@ vector<int>& GetIdFromOverlappedSector(int p_id) {
 	lock_guard<mutex> lock(actor->selectedSectorLock);
 	returnSector.clear();
 	mainSector.sectorLock.lock();
-	for (auto id : mainSector.sector) {
-		if ((!amINpc || (amINpc && !IsNpc(id))) &&
-			id != p_id &&
-			CanSee(id, p_id)) {
-			returnSector.push_back(id);
+	for (auto otherId : mainSector.sector) {
+		if ((!amINpc || (amINpc && !IsNpc(otherId))) && 
+			otherId != p_id &&
+			CanSee(otherId, p_id)) {
+			returnSector.push_back(otherId);
 		}
 	}
 	mainSector.sectorLock.unlock();
@@ -1189,124 +1266,6 @@ void SleepNpc(int id) {
 	auto actor = GetActor(id);
 	actor->isActive = false;
 	TimerQueueManager::RemoveAll(id);
-	//cout << "sleep id: " << id << endl;
-}
-
-/// <summary>
-/// 한 스레드에서만 호출안되기때문에 lock 안걸어도됨
-/// </summary>
-/// <param name="id"></param>
-void ProcessPacket(int playerId, unsigned char* buf) {
-	switch (buf[1]) {
-	case CS_LOGIN: {
-		cs_packet_login* packet = reinterpret_cast<cs_packet_login*>(buf);
-		auto logined_actor = GetPlayer(playerId);
-		auto session = logined_actor->GetSession();
-		session->state = PLST_INGAME;
-		{
-			// 위치 이름 초기화
-			lock_guard <mutex> lock{ session->socketLock };
-			strcpy_s(logined_actor->name, packet->player_id);
-			//session->x = 1; session->y = 1;
-			logined_actor->x = rand() % WORLD_WIDTH;
-			logined_actor->y = rand() % WORLD_HEIGHT;
-		}
-		{
-			// 섹터에 추가
-			auto& sector = world_sector[logined_actor->y / WORLD_SECTOR_SIZE][logined_actor->x / WORLD_SECTOR_SIZE];
-			lock_guard <mutex> lock{ sector.sectorLock };
-			sector.sector.insert(playerId);
-		}
-		send_login_ok_packet(playerId);
-
-		auto& selected_sector = GetIdFromOverlappedSector(playerId);
-
-		logined_actor->viewSetLock.lock();
-		for (auto id : selected_sector) {
-			logined_actor->viewSet.insert(id);
-		}
-		logined_actor->viewSetLock.unlock();
-		for (auto id : selected_sector) {
-			auto other = GetActor(id);
-			other->viewSetLock.lock();
-			other->viewSet.insert(playerId);
-			other->viewSetLock.unlock();
-			send_add_object(playerId, id);
-			if (!IsNpc(id)) {
-				send_add_object(id, playerId);
-			} else {
-				WakeUpNpc(other->id);
-			}
-		}
-		break;
-	}
-	case CS_MOVE: {
-		cs_packet_move* packet = reinterpret_cast<cs_packet_move*>(buf);
-		auto actor = GetActor(playerId);
-		actor->moveTime = packet->move_time;
-		//actor->moveTime = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-		GetActor(playerId)->Move((DIRECTION)packet->direction);
-		break;
-	}
-	case CS_ATTACK: {
-		cs_packet_attack* packet = reinterpret_cast<cs_packet_attack*>(buf);
-		GetPlayer(playerId)->Attack();
-		break;
-	}
-	default: {
-		cout << "Unknown Packet Type from Client[" << playerId;
-		cout << "] Packet Type [" << +buf[1] << "]";
-		while (true);
-	}
-	}
-}
-
-void Disconnect(int playerId) {
-	auto actor = GetPlayer(playerId);
-	auto session = actor->GetSession();
-	if (session->state == PLST_FREE) {
-		return;
-	}
-	closesocket(session->socket);
-	session->state = PLST_FREE;
-
-	session->bufOverManager.ClearSendingData();
-	{
-		lock_guard<mutex> lock(session->recvedBufLock);
-		session->recvedBuf.clear();
-	}
-	// remove from sector
-	int y;
-	int x;
-	y = actor->y; // TODO y 할당하는 중에 다른 스레드에서 값이 변하면 똥값들가는듯
-	x = actor->x;
-	auto sector_y = y / WORLD_SECTOR_SIZE;
-	auto sector_x = x / WORLD_SECTOR_SIZE;
-	auto& main_sector = world_sector[sector_y][sector_x];
-	main_sector.sectorLock.lock();
-	main_sector.sector.erase(playerId);
-	main_sector.sectorLock.unlock();
-	//
-
-	actor->viewSetLock.lock();
-	vector<int> oldViewList(actor->viewSet.begin(), actor->viewSet.end());
-	actor->viewSet.clear();
-	actor->viewSetLock.unlock();
-	auto& m_old_view_list = oldViewList;
-	for (auto pl : m_old_view_list) {
-		if (IsNpc(pl)) {
-			lock_guard<mutex> lock(GetActor(pl)->viewSetLock);
-			GetActor(pl)->viewSet.erase(actor->id);
-			continue;
-		}
-		auto otherPlayer = GetPlayer(playerId);
-		auto session2 = otherPlayer->GetSession();
-		if (PLST_INGAME == session2->state) {
-			send_remove_object(otherPlayer->id, playerId);
-			lock_guard<mutex> lock(otherPlayer->viewSetLock);
-			otherPlayer->viewSet.erase(actor->id);
-		}
-	}
 }
 
 void Actor::RemoveFromViewSet(int otherId) {
@@ -1316,16 +1275,21 @@ void Actor::RemoveFromViewSet(int otherId) {
 }
 
 void Actor::Die() {
-	// TODO 몬스터 죽었는데 시야에서 안사라짐
-	isActive = false;
+	RemoveFromAll();
+}
+
+void Actor::RemoveFromAll() {
 	viewSetLock.lock();
-	for (auto viewId : viewSet){
-		if (!IsNpc(viewId)){
-			send_remove_object(viewId, id);
+	for (auto viewId : viewSet) {
+		if (!IsNpc(viewId)) {
+			GetPlayer(viewId)->SendRemoveActor(id);
 		}
+		GetActor(viewId)->RemoveFromViewSet(id);
 	}
 	viewSet.clear();
 	viewSetLock.unlock();
+	RemoveFromSector();
+	TimerQueueManager::RemoveAll(id);
 }
 
 void Actor::SendStatChange() {
@@ -1336,11 +1300,13 @@ void Actor::SendStatChange() {
 			if(IsNpc(viewId)){
 				continue;
 			}
-			send_stat_change(viewId, id, GetHp(), GetLevel(), GetExp());
+			GetPlayer(viewId)->SendChangedStat(id, GetHp(), GetLevel(), GetExp());
 		}
 	}
 	if(GetHp() == 0){
-		Die();
+		TimerQueueManager::Add(id, 1, nullptr, [this](int) {
+			Die();
+			});
 	}
 }
 
@@ -1362,6 +1328,38 @@ void UpdateSector(int actorId, int prevX, int prevY, int x, int y) {
 	}
 }
 
+void NonPlayer::InitLua(const char* path) {
+	L = luaL_newstate();
+	luaL_openlibs(L);
+	luaL_loadfile(L, path);
+	CallLuaFunction(L, 0, 0);
+
+	// API함수들은 락걸린 LUA함수가 호출하기에 락이 필요없다.
+	lua_register(L, "LuaSetPos", LuaSetPos);
+	lua_register(L, "LuaGetX", LuaGetX);
+	lua_register(L, "LuaGetY", LuaGetY);
+	lua_register(L, "LuaSendMess", LuaSendMess);
+	lua_register(L, "LuaSendStatChange", LuaSendStatChange);
+	lua_register(L, "LauGetHp", LauGetHp);
+	lua_register(L, "LuaGetLevel", LuaGetLevel);
+	lua_register(L, "LuaGetExp", LuaGetExp);
+	lua_register(L, "LuaTakeDamage", LuaTakeDamage);
+	lua_register(L, "LuaPrint", LuaPrint);
+	lua_register(L, "LuaAddEventNpcRandomMove", LuaAddEventNpcRandomMove);
+	lua_register(L, "LuaAddEventSendMess", LuaAddEventSendMess);
+
+	lua_getglobal(L, "SetId");
+	lua_pushnumber(L, id);
+	CallLuaFunction(L, 1, 0);
+
+}
+
+void NonPlayer::AddToViewSet(int otherId) {
+	Actor::AddToViewSet(otherId);
+	OnNearActorWithSelfMove(otherId);
+	WakeUpNpc(id);
+}
+
 void NonPlayer::Die() {
 	Actor::Die();
 	SleepNpc(id);
@@ -1373,9 +1371,7 @@ void NonPlayer::SetPos(int x, int y) {
 	this->x = x;
 	this->y = y;
 	UpdateSector(id, prevX, prevY, x, y);
-
-	CopyViewSetToOldViewList();
-
+	
 	newViewList = GetIdFromOverlappedSector(id);
 #ifdef NPCLOG
 		lock_guard<mutex> coutLock{ coutMutex };
@@ -1396,38 +1392,34 @@ void NonPlayer::SetPos(int x, int y) {
 			cout << " & 아무에게도 안보여서 취침" << endl;
 #endif
 		for (auto otherId : oldViewList) {
-			auto actor = GetActor(otherId);
-			actor->RemoveFromViewSet(id);
+			GetActor(otherId)->RemoveFromViewSet(id);
 		}
 		return;
 	}
+	CopyViewSetToOldViewList();
 	for (auto otherId : newViewList) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			// 플레이어의 시야에 등장
 			AddToViewSet(otherId);
-			OnNearActorWithSelfMove(otherId);
-			auto otherActor = GetActor(otherId);
-			otherActor->AddToViewSet(id);
+			GetPlayer(otherId)->AddToViewSet(id);
 #ifdef NPCLOG
-			cout << " &[" << pl << "]에게 등장";
+			cout << " &[" << otherId << "]에게 등장";
 #endif
 		} else {
 			// 플레이어가 계속 보고있음.
 #ifdef NPCLOG
-			cout << " &[" << pl << "]에게 위치 갱신";
+			cout << " &[" << otherId << "]에게 위치 갱신";
 #endif
-
 			OnNearActorWithSelfMove(otherId);
-			send_move_packet(otherId, id);
+			GetPlayer(otherId)->SendMove(id);
 		}
 	}
-	for (auto otherId : oldViewList){
-		if (newViewList.end() == std::find(newViewList.begin(), newViewList.end(), otherId)){
+	for (auto otherId : oldViewList) {
+		if (newViewList.end() == std::find(newViewList.begin(), newViewList.end(), otherId)) {
 			RemoveFromViewSet(otherId);
-			auto actor = GetActor(otherId);
-			actor->RemoveFromViewSet(id);
+			GetActor(otherId)->RemoveFromViewSet(id);
 #ifdef NPCLOG
-				cout << " &[" << pl << "]에게서 사라짐";
+			cout << " &[" << otherId << "]에게서 사라짐";
 #endif
 		}
 	}
@@ -1461,9 +1453,14 @@ void Monster::Update() {
 	//if (GetIdFromOverlappedSector(id).empty()){
 	//	SleepNpc(id);
 	//}
-	lua_getglobal(L, "tick");
+	lua_getglobal(L, "Tick");
 	{
 		lock_guard<mutex> lock(viewSetLock);
+		if(viewSet.empty()){
+			SleepNpc(id);
+			lua_pop(L, 1);
+			return;
+		}
 		asTable(L, viewSet.begin(), viewSet.end());
 	}
 	CallLuaFunction(L, 1, 0);
@@ -1471,7 +1468,6 @@ void Monster::Update() {
 
 Player::Player(int id): Actor(id) {
 	actors[id] = this;
-	isActive = true;
 	session.state = PLST_FREE;
 	session.recvOver.callback = [this](int bufSize) {
 		auto exOver = session.recvOver;
@@ -1484,7 +1480,7 @@ Player::Player(int id): Actor(id) {
 			session.recvedBuf.resize(prevPacketSize);
 			memcpy(1 + &session.recvedBuf.back(), exOver.packetBuf, splitBufSize);
 			recvPacketPtr = &session.recvedBuf[0];
-			ProcessPacket(this->id, recvPacketPtr);
+			ProcessPacket(recvPacketPtr);
 			recvPacketPtr = exOver.packetBuf + splitBufSize;
 			totalRecvBufSize -= splitBufSize;
 		} else {
@@ -1494,7 +1490,7 @@ Player::Player(int id): Actor(id) {
 		for (unsigned char recvPacketSize = recvPacketPtr[0];
 			0 < totalRecvBufSize;
 			recvPacketSize = recvPacketPtr[0]) {
-			ProcessPacket(this->id, recvPacketPtr);
+			ProcessPacket(recvPacketPtr);
 			totalRecvBufSize -= recvPacketSize;
 			recvPacketPtr += recvPacketSize;
 		}
@@ -1509,7 +1505,7 @@ Player::Player(int id): Actor(id) {
 				session.recvedBufSize = 0;
 			}
 		}
-		CallRecv(this->id);
+		CallRecv();
 	};
 }
 
@@ -1535,7 +1531,7 @@ void Player::SetPos(int x, int y) {
 	this->x = x;
 	this->y = y;
 	
-	send_move_packet(id, id);
+	SendMove(id);
 
 	UpdateSector(id, prevX, prevY, x, y);
 	
@@ -1547,24 +1543,12 @@ void Player::SetPos(int x, int y) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			//1. 새로 시야에 들어오는 플레이어
 			AddToViewSet(otherId);
-
-			auto other_actor = GetActor(otherId);
-			other_actor->AddToViewSet(id);
-			if (IsNpc(otherId)) {
-				WakeUpNpc(otherId);
-#ifdef PLAYERLOG
-				{
-					lock_guard<mutex> coutLock{ coutMutex };
-					cout << "플레이어[" << id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 등장 그리고 깨움" << endl;
-				}
-#endif
-			}
+			GetActor(otherId)->AddToViewSet(id);
 		} else {
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
-			if (false == IsNpc(otherId)) {
-				send_move_packet(id, otherId);
+			if (!IsNpc(otherId)) {
+				GetPlayer(otherId)->SendMove(id);
 			} else {
-				// NPC라면 OP_PLAYER_APPROACH 호출
 #ifdef PLAYERLOG
 				{
 					lock_guard<mutex> coutLock{ coutMutex };
@@ -1579,15 +1563,13 @@ void Player::SetPos(int x, int y) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), otherId)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
 			RemoveFromViewSet(otherId);
-
-			auto other_actor = GetActor(otherId);
-			other_actor->RemoveFromViewSet(id);
+			GetActor(otherId)->RemoveFromViewSet(id);
 		}
 	}
 }
 
 void Player::SendStatChange() {
-	send_stat_change(id, id, hp, level, exp);
+	SendChangedStat(id, hp, level, exp);
 	Actor::SendStatChange();
 }
 
@@ -1602,13 +1584,98 @@ bool Player::TakeDamage(int attackerId) {
 	return false;
 }
 
-void worker(HANDLE h_iocp, SOCKET l_socket) {
+void Player::ProcessPacket(unsigned char* buf) {
+	switch (buf[1]){
+	case CS_LOGIN: {
+		cs_packet_login* packet = reinterpret_cast<cs_packet_login*>(buf);
+		session.state = PLST_INGAME;
+		{
+			// 위치 이름 초기화
+			lock_guard<mutex> lock{session.socketLock};
+			strcpy_s(name, packet->player_id);
+
+			x = rand() % WORLD_WIDTH;
+			y = rand() % WORLD_HEIGHT;
+#ifdef PLAYER_NOT_RANDOM_SPAWN
+			x = 0;
+			y = 0;
+#endif
+			Init();
+		}
+		isActive = true;
+		InitSector();
+		send_login_ok_packet(id);
+
+		auto& selected_sector = GetIdFromOverlappedSector(id);
+
+		viewSetLock.lock();
+		for (auto otherId : selected_sector){
+			viewSet.insert(otherId);
+		}
+		viewSetLock.unlock();
+		for (auto otherId : selected_sector){
+			auto other = GetActor(otherId);
+			other->AddToViewSet(id);
+			SendAddActor(otherId);
+			if (!IsNpc(otherId)){
+				GetPlayer(otherId)->SendAddActor(id);
+			}
+		}
+		break;
+	}
+	case CS_MOVE: {
+		auto packet = reinterpret_cast<cs_packet_move*>(buf);
+		auto actor = GetActor(id);
+		actor->moveTime = packet->move_time;
+		Move(static_cast<DIRECTION>(packet->direction));
+		break;
+	}
+	case CS_ATTACK: {
+		auto* packet = reinterpret_cast<cs_packet_attack*>(buf);
+		Attack();
+		break;
+	}
+	case CS_CHAT: {
+		auto* packet = reinterpret_cast<cs_packet_chat*>(buf);
+		lock_guard<mutex> lock(viewSetLock);
+		for (auto viewId : viewSet){
+			if(!IsNpc(viewId)){
+				GetPlayer(viewId)->SendChat(id, packet->message);
+			}
+		}
+		break;
+	}
+	default: {
+		cout << "Unknown Packet Type from Client[" << id;
+		cout << "] Packet Type [" << +buf[1] << "]";
+		while (true);
+	}
+	}
+}
+
+void Player::CallRecv() const {
+	auto session = GetPlayer(id)->GetSession();
+	auto& recvOver = session->recvOver;
+	recvOver.wsabuf[0].buf =
+		reinterpret_cast<char*>(recvOver.packetBuf);
+	recvOver.wsabuf[0].len = MAX_BUFFER;
+	memset(&recvOver.over, 0, sizeof(recvOver.over));
+	DWORD r_flag = 0;
+	int ret = WSARecv(session->socket, recvOver.wsabuf, 1, NULL, &r_flag, &recvOver.over, NULL);
+	if (0 != ret){
+		int err_no = WSAGetLastError();
+		if (WSA_IO_PENDING != err_no)
+			display_error("WSARecv : ", WSAGetLastError());
+	}
+}
+
+void Worker(HANDLE hIocp) {
 	while (true) {
 		DWORD recvBufSize;
 		ULONG_PTR recvKey;
 		WSAOVERLAPPED* recvOver;
 
-		BOOL ret = GetQueuedCompletionStatus(h_iocp, &recvBufSize,
+		BOOL ret = GetQueuedCompletionStatus(hIocp, &recvBufSize,
 			&recvKey, &recvOver, INFINITE);
 
 		int key = static_cast<int>(recvKey);
@@ -1618,10 +1685,10 @@ void worker(HANDLE h_iocp, SOCKET l_socket) {
 				cout << "서버키가 Key로 넘어옴" << endl;
 				exit(-1);
 			}
-			Disconnect(key);
+			GetPlayer(key)->Disconnect();
 		}
 		if ((key != SERVER_ID) && (0 == recvBufSize)) {
-			Disconnect(key);
+			GetPlayer(key)->Disconnect();
 			continue;
 		}
 		auto over = reinterpret_cast<MiniOver*>(reinterpret_cast<char*>(recvOver)-sizeof(void*)); // vtable 로 인해 포인터 바이트수 만큼 뺌
@@ -1651,12 +1718,12 @@ int main() {
 	}
 	for (int i = MAX_PLAYER + 1; i <= MAX_USER; i++) {
 		if(i < MONSTER_ID_START){
-			Npc::Get(i);
+			Npc::Get(i)->Init();
 		}else{
 			if(i%2 == 0){
-				Monster::Get(i);
+				Monster::Get(i)->Init();
 			}else{
-				Monster::Get(i);
+				Monster::Get(i)->Init();
 			}
 		}
 	}
@@ -1680,12 +1747,12 @@ int main() {
 	cout << &accept_over << endl;
 
 	accept_over.callback = [&](int) {
-		int acceptId = GetNewPlayerId(accept_over.cSocket);
+		int acceptId = Player::GetNewId(accept_over.cSocket);
 		if (-1 != acceptId) {
 			auto session = GetPlayer(acceptId)->GetSession();
 			CreateIoCompletionPort(
 				reinterpret_cast<HANDLE>(session->socket), hIocp, acceptId, 0);
-			CallRecv(acceptId);
+			GetPlayer(acceptId)->CallRecv();
 		} else {
 			closesocket(accept_over.cSocket);
 			cout << "인원 수 꽉참" << endl;
@@ -1699,7 +1766,7 @@ int main() {
 	thread timer_thread(TimerQueueManager::Do);
 	vector <thread> worker_threads;
 	for (int i = 0; i < 3; ++i)
-		worker_threads.emplace_back(worker, hIocp, listenSocket);
+		worker_threads.emplace_back(Worker, hIocp);
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);
