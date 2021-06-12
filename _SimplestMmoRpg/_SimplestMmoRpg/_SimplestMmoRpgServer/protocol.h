@@ -19,7 +19,8 @@ constexpr int NPC_ID_START = 5000;
 
 
 	
-#define VIEW_RADIUS		7
+#define VIEW_RADIUS		15
+constexpr int HALF_VIEW_RADIUS = VIEW_RADIUS/2;
 
 #define SERVER_PORT		3500
 
@@ -148,8 +149,10 @@ typedef  cs_packet_login c2s_login;
 
 constexpr int MAX_BUFFER= 256;
 constexpr int MAX_PLAYER=(NPC_ID_START);
-constexpr int MAX_NPC=(MAX_USER - NPC_ID_START);
-constexpr int MONSTER_ID_START = (MAX_NPC/2+NPC_ID_START);
+constexpr int MAX_NONACTOR=(MAX_USER - NPC_ID_START);
+constexpr int MONSTER_ID_START = (MAX_NONACTOR/2+NPC_ID_START);
+constexpr int MAX_MONSTER = (MAX_USER - MONSTER_ID_START) + 1;
+constexpr int MAX_NPC = (MAX_NONACTOR - MAX_MONSTER);
 constexpr int MESSAGE_MAX_BUFFER= MAX_STR_LEN;
 constexpr int MAX_NAME= MAX_ID_LEN;
 enum DIRECTION { D_N, D_S, D_W, D_E, D_NO };

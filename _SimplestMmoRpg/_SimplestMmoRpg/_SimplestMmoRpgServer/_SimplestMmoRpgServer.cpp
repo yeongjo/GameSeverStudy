@@ -45,7 +45,9 @@
 #include <array>
 #include <functional>
 #include <queue>
+#include <random>
 #include <unordered_set>
+class Monster;
 class Player;
 struct Actor;
 struct BufOverManager;
@@ -418,6 +420,57 @@ struct Session {
 };
 
 array <Actor*, MAX_USER + 1> actors;
+
+class WorldManager {
+public:
+	enum class EFindPlayerAct { Peace, Agro, COUNT };
+	enum class ESoloMove { Fixing, Roaming, COUNT };
+	struct FileMonster {
+		int x, y, hp, level, exp, damage;
+		string name;
+		string script;
+		EFindPlayerAct findPlayerAct;
+		ESoloMove soloMove;
+	};
+private:
+	vector<FileMonster> monsters;
+public:
+	void Load() {
+
+	}
+
+	void Generate() {
+		monsters.resize(MAX_MONSTER);
+		for (size_t i = 0; i < monsters.size(); i++) {
+			monsters[i].x = rand() % WORLD_WIDTH;
+			monsters[i].y = rand() % WORLD_HEIGHT;
+			auto findPlayerAct = static_cast<EFindPlayerAct>(rand() % static_cast<int>(EFindPlayerAct::COUNT));
+			auto soloMove = static_cast<ESoloMove>(rand() % static_cast<int>(ESoloMove::COUNT));
+			monsters[i].findPlayerAct = findPlayerAct;
+			monsters[i].soloMove = soloMove;
+			if (findPlayerAct == EFindPlayerAct::Peace) {
+				if (soloMove == ESoloMove::Fixing) {
+					monsters[i].name = "Peace Orc";
+				} else if (soloMove == ESoloMove::Roaming) {
+					monsters[i].name = "Peace Roaming Orc";
+				}
+			} else if (findPlayerAct == EFindPlayerAct::Agro) {
+				if (soloMove == ESoloMove::Fixing) {
+					monsters[i].name = "Agro Orc";
+				} else if (soloMove == ESoloMove::Roaming) {
+					monsters[i].name = "Agro Roaming Orc";
+				}
+			}
+			monsters[i].script = "Monster.lua";
+		}
+	}
+
+	void Save() {
+
+	}
+
+	Monster* GetMonster(int id);
+};
 
 Actor* GetActor(int id) {
 	return actors[id];
@@ -1027,8 +1080,22 @@ public:
 		sprintf_s(name, "M%d", id);
 		x = rand() % WORLD_WIDTH;
 		y = rand() % WORLD_HEIGHT;
+		Init(x, y, name, "Monster.lua", WorldManager::EFindPlayerAct::Peace, WorldManager::ESoloMove::Fixing);
+	}
+
+	void Init(int x, int y, string name, string script, WorldManager::EFindPlayerAct findPlayerAct, WorldManager::ESoloMove soloMove) {
+		strcpy_s(this->name, name.c_str());
+		this->x = x;
+		this->y = y;
 		NonPlayer::Init();
-		InitLua("Monster.lua");
+		InitLua(script.c_str());
+
+		lua_pushnumber(L, static_cast<int>(findPlayerAct));
+		lua_setglobal(L, "mFindPlayerAct");
+		lua_pushnumber(L, static_cast<int>(soloMove));
+		lua_setglobal(L, "mSoloMove");
+		lua_getglobal(L, "InitStat");
+		CallLuaFunction(L, 0, 0);
 	}
 
 	void Update() override;
@@ -1038,6 +1105,22 @@ public:
 
 	}
 };
+
+std::string random_string(std::size_t length) {
+	const std::string CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+	std::random_device random_device;
+	std::mt19937 generator(random_device());
+	std::uniform_int_distribution<> distribution(0, CHARACTERS.size() - 1);
+
+	std::string random_string;
+
+	for (std::size_t i = 0; i < length; ++i) {
+		random_string += CHARACTERS[distribution(generator)];
+	}
+
+	return random_string;
+}
 
 void display_error(const char* msg, int errNum) {
 #ifdef DISPLAYLOG
@@ -1204,41 +1287,42 @@ vector<int>& GetIdFromOverlappedSector(int p_id) {
 	returnSector.clear();
 	mainSector.sectorLock.lock();
 	for (auto otherId : mainSector.sector) {
-		if ((!amINpc || (amINpc && !IsNpc(otherId))) && 
-			otherId != p_id &&
-			CanSee(otherId, p_id)) {
-			returnSector.push_back(otherId);
+		if ((amINpc && IsNpc(otherId)) || 
+			otherId == p_id ||
+			!CanSee(otherId, p_id)) {
+			continue;
 		}
+		returnSector.push_back(otherId);
 	}
 	mainSector.sectorLock.unlock();
 
-	auto sectorViewFrustumTop = (y - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sectorViewFrustumBottom = (y + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sectorViewFrustumLeft = (x - VIEW_RADIUS) / WORLD_SECTOR_SIZE;
-	auto sectorViewFrustumRight = (x + VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumTop = (y - HALF_VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumBottom = (y + HALF_VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumLeft = (x - HALF_VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto sectorViewFrustumRight = (x + HALF_VIEW_RADIUS) / WORLD_SECTOR_SIZE;
+	auto isLeft = sectorViewFrustumLeft != sectorX && 0 < sectorX;
+	auto isRight = sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[sectorViewFrustumTop].size() - 1);
 	if (sectorViewFrustumTop != sectorY && 0 < sectorY) {
 		AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorX, returnSector);
-		if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+		if (isLeft) {
 			AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorViewFrustumLeft, returnSector);
-		} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[
-			sectorViewFrustumTop].size() - 1)) {
+		} else if (isRight) {
 			AddSectorPlayersToMainSector(p_id, sectorViewFrustumTop, sectorViewFrustumRight,
 				returnSector);
 		}
 	} else if (sectorViewFrustumBottom != sectorY && sectorY < static_cast<int>(world_sector.size() - 1)) {
 		AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorX, returnSector);
-		if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+		if (isLeft) {
 			AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorViewFrustumLeft,
 				returnSector);
-		} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[
-			sectorViewFrustumBottom].size() - 1)) {
+		} else if (isRight) {
 			AddSectorPlayersToMainSector(p_id, sectorViewFrustumBottom, sectorViewFrustumRight,
 				returnSector);
 		}
 	}
-	if (sectorViewFrustumLeft != sectorX && 0 < sectorX) {
+	if (isLeft) {
 		AddSectorPlayersToMainSector(p_id, sectorY, sectorViewFrustumLeft, returnSector);
-	} else if (sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[sectorY].size() - 1)) {
+	} else if (isRight) {
 		AddSectorPlayersToMainSector(p_id, sectorY, sectorViewFrustumRight, returnSector);
 	}
 	return returnSector;
@@ -1266,6 +1350,13 @@ void SleepNpc(int id) {
 	auto actor = GetActor(id);
 	actor->isActive = false;
 	TimerQueueManager::RemoveAll(id);
+}
+
+Monster* WorldManager::GetMonster(int id) {
+	auto monster = Monster::Get(id);
+	auto& fileMonster = monsters[id-MONSTER_ID_START];
+	monster->Init(fileMonster.x, fileMonster.y, fileMonster.name, fileMonster.script, fileMonster.findPlayerAct, fileMonster.soloMove);
+	return monster;
 }
 
 void Actor::RemoveFromViewSet(int otherId) {
@@ -1712,7 +1803,10 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 	}
 }
 
+WorldManager worldManager;
+
 int main() {
+	worldManager.Generate();
 	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
 		Player::Get(i);
 	}
@@ -1720,11 +1814,7 @@ int main() {
 		if(i < MONSTER_ID_START){
 			Npc::Get(i)->Init();
 		}else{
-			if(i%2 == 0){
-				Monster::Get(i)->Init();
-			}else{
-				Monster::Get(i)->Init();
-			}
+			worldManager.GetMonster(i);
 		}
 	}
 
