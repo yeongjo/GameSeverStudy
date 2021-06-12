@@ -242,6 +242,20 @@ OBJECT black_tile;
 
 sf::Texture* board;
 sf::Texture* pieces;
+sf::Texture* mapTexture;
+sf::Image mapImage;
+sf::Vector2u mapSize;
+
+
+ETile GetMapTile(int x, int y) {
+	_ASSERT(0 <= x && x < mapSize.x);
+	_ASSERT(0 <= y && y < mapSize.y);
+	auto color = mapImage.getPixel(x, y);
+	if(color.r > 0.5f){
+		return Wall;
+	}
+	return Empty;
+}
 
 OBJECT* get_player(int id) {
 	return &players[id];
@@ -250,12 +264,16 @@ OBJECT* get_player(int id) {
 void client_initialize() {
 	board = new sf::Texture;
 	pieces = new sf::Texture;
+	mapTexture = new sf::Texture;
 	if (false == g_font.loadFromFile("cour.ttf")) {
 		cout << "Font Loading Error!\n";
 		while (true);
 	}
 	board->loadFromFile("chessmap.bmp");
 	pieces->loadFromFile("chess2.png");
+	mapTexture->loadFromFile("../../map.bmp");
+	mapImage = mapTexture->copyToImage();
+	mapSize = mapImage.getSize();
 	textField = new sf::TextField(MAX_STR_LEN);
 	textField->setPosition(0, 40);
 	white_tile = OBJECT{ *board, 5, 5, TILE_WIDTH, TILE_WIDTH };
@@ -299,7 +317,7 @@ void ProcessPacket(char* ptr) {
 		if (id < MAX_USER) {
 			stringstream ss;
 			ss << my_packet->name;
-			ss << "\n";
+			ss << "/";
 			ss << my_packet->id;
 			players[id].set_name(ss.str().c_str());
 			players[id].move(my_packet->x, my_packet->y);
@@ -428,13 +446,26 @@ void client_main() {
 			int tile_x = i + g_left_x;
 			int tile_y = j + g_top_y;
 			if ((tile_x < 0) || (tile_y < 0)) continue;
-			if ((((tile_x / 3) + (tile_y / 3)) % 2) == 1) {
-				white_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
-				white_tile.a_draw();
-			} else {
+			auto tileType = GetMapTile(tile_x, tile_y);
+			switch (tileType){
+			case Wall: {
 				black_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
 				black_tile.a_draw();
+				break;
 			}
+			default: {
+				white_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
+				white_tile.a_draw();
+				break;
+			}
+			}
+			//if ((((tile_x / 3) + (tile_y / 3)) % 2) == 1) {
+			//	white_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
+			//	white_tile.a_draw();
+			//} else {
+			//	black_tile.a_move(TILE_WIDTH * i + 7, TILE_WIDTH * j + 7);
+			//	black_tile.a_draw();
+			//}
 		}
 	avatar.draw();
 	for (auto& pl : players) pl.draw();

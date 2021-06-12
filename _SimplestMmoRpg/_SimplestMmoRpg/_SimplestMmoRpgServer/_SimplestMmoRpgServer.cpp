@@ -88,6 +88,54 @@ enum EPlayerState { PLST_FREE, PLST_CONNECTED, PLST_INGAME };
 
 typedef function<void(int)> iocpCallback;
 
+struct Color {
+	unsigned char b, g, r;
+};
+
+struct Image {
+	Color* pixel;
+	int width, height;
+
+	Image(){}
+	Image(Color* pixel, int width, int height) : pixel(pixel), width(width), height(height){}
+
+	Color GetPixel(int x, int y) const {
+		_ASSERT(0 <= x && x < width);
+		_ASSERT(0 <= y && y < height);
+		return pixel[(height-y-1) * width + x];
+	}
+};
+
+Image ReadBmp(const char* filename) {
+	int i;
+	FILE* f;
+	if(0 != fopen_s(&f, filename, "rb")){
+		cout << "bmp open error: " << filename << endl;
+		return Image();
+	}
+	unsigned char info[54];
+
+	// read the 54-byte header
+	fread(info, sizeof(unsigned char), 54, f);
+
+	// extract image height and width from header
+	int width = *(int*)&info[18];
+	int height = *(int*)&info[22];
+
+	// allocate 3 bytes per pixel
+	int size = width * height;
+	Color* color = new Color[size];
+	//unsigned char* pixel = new unsigned char[size*3];
+
+	// read the rest of the data at once
+	//fread(pixel, sizeof(unsigned char), size *3, f);
+	fread(color, sizeof(unsigned char), size*3, f);
+	fclose(f);
+
+	//Now data should contain the (R, G, B) values of the pixels. The color of pixel (i, j) is stored at data[3 * (i * width + j)], data[3 * (i * width + j) + 1] and data[3 * (i * width + j) + 2].
+	return Image(color, width, height);
+}
+
 template <typename T, typename U>
 void asTable(lua_State* L, T begin, U end) {
 	lua_newtable(L);
@@ -434,9 +482,23 @@ public:
 	};
 private:
 	vector<FileMonster> monsters;
+	vector<vector<ETile>> world;
 public:
 	void Load() {
-
+		auto image = ReadBmp("../../map.bmp");
+		world.resize(image.height);
+		for (size_t y = 0; y < image.height; y++) {
+			world[y].resize(image.width);
+			for (size_t x = 0; x < image.width; x++) {
+				world[y][x] = ETile::Empty;
+				switch (image.GetPixel(x, y).r) {
+				case 255: {
+					world[y][x] = ETile::Wall;
+					break;
+				}
+				}
+			}
+		}
 	}
 
 	void Generate() {
@@ -444,6 +506,10 @@ public:
 		for (size_t i = 0; i < monsters.size(); i++) {
 			monsters[i].x = rand() % WORLD_WIDTH;
 			monsters[i].y = rand() % WORLD_HEIGHT;
+			auto level = 1;
+			monsters[i].hp = 2* level;
+			monsters[i].level = level;
+			monsters[i].exp = level* level*2;
 			auto findPlayerAct = static_cast<EFindPlayerAct>(rand() % static_cast<int>(EFindPlayerAct::COUNT));
 			auto soloMove = static_cast<ESoloMove>(rand() % static_cast<int>(ESoloMove::COUNT));
 			monsters[i].findPlayerAct = findPlayerAct;
@@ -453,24 +519,30 @@ public:
 					monsters[i].name = "Peace Orc";
 				} else if (soloMove == ESoloMove::Roaming) {
 					monsters[i].name = "Peace Roaming Orc";
+					monsters[i].exp *= 2;
 				}
 			} else if (findPlayerAct == EFindPlayerAct::Agro) {
+				monsters[i].exp *= 2;
 				if (soloMove == ESoloMove::Fixing) {
 					monsters[i].name = "Agro Orc";
 				} else if (soloMove == ESoloMove::Roaming) {
 					monsters[i].name = "Agro Roaming Orc";
+					monsters[i].exp *= 2;
 				}
 			}
 			monsters[i].script = "Monster.lua";
 		}
-	}
-
-	void Save() {
 
 	}
 
 	Monster* GetMonster(int id);
+	bool GetCollidable(int x, int y) {
+		auto tile = world[y][x];
+		return tile == Wall;
+	}
 };
+
+WorldManager worldManager;
 
 Actor* GetActor(int id) {
 	return actors[id];
@@ -1080,25 +1152,46 @@ public:
 		sprintf_s(name, "M%d", id);
 		x = rand() % WORLD_WIDTH;
 		y = rand() % WORLD_HEIGHT;
-		Init(x, y, name, "Monster.lua", WorldManager::EFindPlayerAct::Peace, WorldManager::ESoloMove::Fixing);
+		WorldManager::FileMonster monster;
+		monster.x = x;
+		monster.y = y;
+		monster.hp = GetHpWithoutLock();
+		monster.level = GetLevelWithoutLock();
+		monster.exp = GetExpWithoutLock();
+		monster.damage = GetDamage();
+		monster.name = name;
+		monster.script = "Monster.lua";
+		monster.findPlayerAct = WorldManager::EFindPlayerAct::Peace;
+		monster.soloMove = WorldManager::ESoloMove::Fixing;
+		Init(monster);
 	}
 
-	void Init(int x, int y, string name, string script, WorldManager::EFindPlayerAct findPlayerAct, WorldManager::ESoloMove soloMove) {
-		strcpy_s(this->name, name.c_str());
-		this->x = x;
-		this->y = y;
+	void Init(WorldManager::FileMonster& monster) {
+		strcpy_s(this->name, monster.name.c_str());
+		this->x = monster.x;
+		this->y = monster.y;
 		NonPlayer::Init();
-		InitLua(script.c_str());
+		InitLua(monster.script.c_str());
+		SetHp(monster.hp);
+		SetLevel(monster.level);
+		SetExp(monster.exp);
+		SetDamage(monster.damage);
 
-		lua_pushnumber(L, static_cast<int>(findPlayerAct));
+		lua_pushnumber(L, static_cast<int>(monster.findPlayerAct));
 		lua_setglobal(L, "mFindPlayerAct");
-		lua_pushnumber(L, static_cast<int>(soloMove));
+		lua_pushnumber(L, static_cast<int>(monster.soloMove));
 		lua_setglobal(L, "mSoloMove");
 		lua_getglobal(L, "InitStat");
 		CallLuaFunction(L, 0, 0);
 	}
 
 	void Update() override;
+
+	void SetDamage(int damage) {
+		lock_guard<mutex> lock(luaLock);
+		lua_pushnumber(L, damage);
+		lua_setglobal(L, "mDamage");
+	}
 
 	void Die() override {
 		NonPlayer::Die();
@@ -1242,7 +1335,7 @@ bool CanSee(int id1, int id2) {
 	int ay = actor1->y;
 	int bx = actor2->x;
 	int by = actor2->y;
-	return VIEW_RADIUS >=
+	return HALF_VIEW_RADIUS >=
 		abs(ax - bx) + abs(ay - by);
 }
 /// <summary>
@@ -1355,7 +1448,7 @@ void SleepNpc(int id) {
 Monster* WorldManager::GetMonster(int id) {
 	auto monster = Monster::Get(id);
 	auto& fileMonster = monsters[id-MONSTER_ID_START];
-	monster->Init(fileMonster.x, fileMonster.y, fileMonster.name, fileMonster.script, fileMonster.findPlayerAct, fileMonster.soloMove);
+	monster->Init(fileMonster);
 	return monster;
 }
 
@@ -1803,10 +1896,9 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 	}
 }
 
-WorldManager worldManager;
-
 int main() {
 	worldManager.Generate();
+	worldManager.Load();
 	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
 		Player::Get(i);
 	}
