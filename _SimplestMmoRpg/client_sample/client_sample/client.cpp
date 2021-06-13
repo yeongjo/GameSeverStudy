@@ -271,7 +271,7 @@ void client_initialize() {
 	}
 	board->loadFromFile("chessmap.bmp");
 	pieces->loadFromFile("chess2.png");
-	mapTexture->loadFromFile("../../map.bmp");
+	mapTexture->loadFromFile(MAP_PATH);
 	mapImage = mapTexture->copyToImage();
 	mapSize = mapImage.getSize();
 	textField = new sf::TextField(MAX_STR_LEN);

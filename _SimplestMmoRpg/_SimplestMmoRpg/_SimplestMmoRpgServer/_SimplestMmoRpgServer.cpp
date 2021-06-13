@@ -44,9 +44,11 @@
 #include <mutex>
 #include <array>
 #include <functional>
+#include <map>
 #include <queue>
 #include <random>
 #include <unordered_set>
+class PathFindHelper;
 class Monster;
 class Player;
 struct Actor;
@@ -98,6 +100,38 @@ struct Image {
 
 	Image(){}
 	Image(Color* pixel, int width, int height) : pixel(pixel), width(width), height(height){}
+	~Image() {
+		delete[] pixel;
+	}
+
+	void ReadBmp(const char* filename) {
+		int i;
+		FILE* f;
+		if (0 != fopen_s(&f, filename, "rb")) {
+			cout << "bmp open error: " << filename << endl;
+			return;
+		}
+		unsigned char info[54];
+
+		// read the 54-byte header
+		fread(info, sizeof(unsigned char), 54, f);
+
+		// extract image height and width from header
+		width = *(int*)&info[18];
+		height = *(int*)&info[22];
+
+		// allocate 3 bytes per pixel
+		int size = width * height;
+		pixel = new Color[size];
+		//unsigned char* pixel = new unsigned char[size*3];
+
+		// read the rest of the data at once
+		//fread(pixel, sizeof(unsigned char), size *3, f);
+		fread(pixel, sizeof(unsigned char), size * 3, f);
+		fclose(f);
+
+		//Now data should contain the (R, G, B) values of the pixels. The color of pixel (i, j) is stored at data[3 * (i * width + j)], data[3 * (i * width + j) + 1] and data[3 * (i * width + j) + 2].
+	}
 
 	Color GetPixel(int x, int y) const {
 		_ASSERT(0 <= x && x < width);
@@ -105,36 +139,6 @@ struct Image {
 		return pixel[(height-y-1) * width + x];
 	}
 };
-
-Image ReadBmp(const char* filename) {
-	int i;
-	FILE* f;
-	if(0 != fopen_s(&f, filename, "rb")){
-		cout << "bmp open error: " << filename << endl;
-		return Image();
-	}
-	unsigned char info[54];
-
-	// read the 54-byte header
-	fread(info, sizeof(unsigned char), 54, f);
-
-	// extract image height and width from header
-	int width = *(int*)&info[18];
-	int height = *(int*)&info[22];
-
-	// allocate 3 bytes per pixel
-	int size = width * height;
-	Color* color = new Color[size];
-	//unsigned char* pixel = new unsigned char[size*3];
-
-	// read the rest of the data at once
-	//fread(pixel, sizeof(unsigned char), size *3, f);
-	fread(color, sizeof(unsigned char), size*3, f);
-	fclose(f);
-
-	//Now data should contain the (R, G, B) values of the pixels. The color of pixel (i, j) is stored at data[3 * (i * width + j)], data[3 * (i * width + j) + 1] and data[3 * (i * width + j) + 2].
-	return Image(color, width, height);
-}
 
 template <typename T, typename U>
 void asTable(lua_State* L, T begin, U end) {
@@ -156,6 +160,62 @@ void fromTable(lua_State* L, T begin, U end) {
 		lua_pop(L, 1);
 	}
 }
+
+/// <summary>
+/// [멀티스레드 전용]리스트로 풀링함, 앞에서 빼는 것과 뒤에서 넣는 것의 락을 따로 걸어 성능 향상을 노림
+/// </summary>
+/// <typeparam name="T"></typeparam>
+template<class T>
+class StructPool {
+	struct Element {
+		T* element;
+		T* next;
+	};
+	Element* start;
+	mutex startLock;
+	Element* end;
+	mutex endLock;
+	atomic_int size;
+public:	
+	T* Get() {
+		lock_guard<mutex> lock(startLock);
+		auto returnObj = start;
+		start = start->next; // start가 null 되지않게 새로운 오브젝트를 계속 만들어주어야한다.
+		--size;
+		if(size <= 1){ // end 하나는 남겨두고 증가시킴
+			CreatePoolObjects();
+		}
+		return returnObj;
+	}
+
+	void Recycle(T* obj) {
+		lock_guard<mutex> lock(endLock);
+		end->next = obj;
+		end = obj;
+		end->next = nullptr;
+		++size;
+	}
+protected:
+	StructPool() : start(nullptr){
+		auto newObj = new Element;
+		newObj->element = new T;
+		end = newObj;
+		end->next = nullptr;
+		newObj = new Element;
+		newObj->element = new T;
+		start = newObj;
+		start->next = end;
+	}
+private:
+	void CreatePoolObjects() { // startLock걸고 호출되어야하며, 원소가 무조건 한개 이상 있어야 함
+		for (size_t i = 0; i < 2; i++) {
+			auto newObj = new Element;
+			newObj->element = new T;
+			newObj->next = start;
+			start = newObj;
+		}
+	}
+};
 
 struct MiniOver {
 	WSAOVERLAPPED	over; // 클래스 생성자에서 초기화하니 값이 원래대로 돌아온다??
@@ -482,18 +542,21 @@ public:
 	};
 private:
 	vector<FileMonster> monsters;
-	vector<vector<ETile>> world;
+	vector<ETile> world;
+	int width, height;
 public:
 	void Load() {
-		auto image = ReadBmp("../../map.bmp");
-		world.resize(image.height);
+		Image image;
+		image.ReadBmp(MAP_PATH);
+		world.resize(image.height* image.width);
+		width = image.width;
+		height = image.height;
 		for (size_t y = 0; y < image.height; y++) {
-			world[y].resize(image.width);
 			for (size_t x = 0; x < image.width; x++) {
-				world[y][x] = ETile::Empty;
+				world[y*image.width+x] = ETile::Empty;
 				switch (image.GetPixel(x, y).r) {
-				case 255: {
-					world[y][x] = ETile::Wall;
+				case 0: {
+					world[y * image.width +x] = ETile::Wall;
 					break;
 				}
 				}
@@ -532,14 +595,26 @@ public:
 			}
 			monsters[i].script = "Monster.lua";
 		}
-
 	}
 
 	Monster* GetMonster(int id);
 	bool GetCollidable(int x, int y) {
-		auto tile = world[y][x];
+		auto tile = world[y*width+x];
 		return tile == Wall;
 	}
+	bool GetCollidable(int index) {
+		auto tile = world[index];
+		return tile == Wall;
+	}
+	int GetWorldIndex(int x, int y) {
+		return y* width + x;
+	}
+	int GetPosFormWorldIndex(int index, int& x, int& y) {
+		y = index / width;
+		x = index - (y * width);
+	}
+	int GetWidth() { return width; }
+	int GetHeight() { return height; }
 };
 
 WorldManager worldManager;
@@ -614,7 +689,23 @@ public:
 
 	virtual void Update() {}
 
-	virtual void Move(DIRECTION dir) {}
+	virtual void Move(DIRECTION dir) {
+		auto x = this->x;
+		auto y = this->y;
+		switch (dir) {
+		case D_E: if (x < WORLD_WIDTH - 1) ++x;
+			break;
+		case D_W: if (x > 0) --x;
+			break;
+		case D_S: if (y < WORLD_HEIGHT - 1) ++y;
+			break;
+		case D_N: if (y > 0) --y;
+			break;
+		}
+		if (IsMovableTile(x, y)) {
+			SetPos(x, y);
+		}
+	}
 
 	virtual void Interact(Actor* interactor) {}
 
@@ -638,6 +729,10 @@ public:
 	virtual void SetPos(int x, int y) {
 		this->x = x;
 		this->y = y;
+	}
+
+	virtual bool IsMovableTile(int x, int y) {
+		return worldManager.GetCollidable(x, y);
 	}
 
 	/// <summary>
@@ -667,6 +762,152 @@ protected:
 	}
 };
 
+class PathFinder {
+	PathFindHelper* pathFindHelper;
+public:
+	
+};
+
+class PathFindHelper {
+	class PathPoint {
+	public:
+		int index, cost;
+		PathPoint(int index, int cost):index(index), cost(cost){}
+		constexpr bool operator<(const PathPoint& a) const {
+			return cost < a.cost;
+		}
+		constexpr bool operator>(const PathPoint& a) const {
+			return cost > a.cost;
+		}
+	};
+	priority_queue<PathPoint> nearPointQueue;
+	unordered_map<int, int> nextTravelPoints;
+	unordered_map<int, int> gcost; // 벽 포함한 지나온길 코스트
+	int targetX, targetY;
+	int startIdx;
+	int currentIdx, nextPosIdx;
+	WorldManager* worldManager;
+
+protected:
+	PathFindHelper(){}
+
+public:
+	static PathFindHelper* Get() {
+		return new PathFindHelper;
+	}
+	
+	void SetWorld(WorldManager* worldManager) {
+		this->worldManager = worldManager;
+	}
+
+	void SetStartAndTarget(int startX, int startY, int targetX, int targetY) {
+		currentIdx = startIdx = worldManager->GetWorldIndex(startX, startY);
+		gcost.clear();
+		gcost[startIdx] = 0;
+		ResetNextPos();
+		this->targetX = targetX;
+		this->targetY = targetY;
+		while (!nearPointQueue.empty()) {
+			nearPointQueue.pop();
+		}
+	}
+
+	void GetNextPos(int& x, int& y) {
+		auto findNextPosIter = nextTravelPoints.find(nextPosIdx);
+		if (findNextPosIter == nextTravelPoints.end()) {
+			return;
+		}
+		worldManager->GetPosFormWorldIndex(nextPosIdx, x, y);
+		nextPosIdx = findNextPosIter->second;
+	}
+
+	/// <summary>
+	/// 한 사이클 길을 찾습니다.
+	/// </summary>
+	/// <returns>길을 찾으면 true를 반환합니다</returns>
+	bool Once() {
+		if(nearPointQueue.empty()){
+			return false;
+		}
+		auto curPoint = nearPointQueue.top();
+		currentIdx = curPoint.index;
+		if(CanMoveStraight(curPoint.index)){
+			return true;
+		}
+		nearPointQueue.pop();
+		auto worldWidth = worldManager->GetWidth();
+		int offset[] = { -1,1,-worldWidth,worldWidth };
+		auto prevIndex = curPoint.index;
+		for (int i = 0; i < 4; i++) {
+			auto movedIndex = prevIndex + offset[i];
+			if (movedIndex < 0 || worldWidth <= movedIndex||
+				worldManager->GetCollidable(movedIndex)) {
+				continue;
+			}
+			auto hcost = GetCostToTarget(movedIndex);
+			auto gcost = 1 + this->gcost[prevIndex];
+			auto movedIndexGcost = this->gcost.find(movedIndex);
+			auto isGcostExist = movedIndexGcost != this->gcost.end();
+			if(isGcostExist){
+				if(movedIndexGcost->second < gcost){
+					movedIndexGcost->second = gcost;
+				}else{
+					continue; // 가는길이 비용이 더 높다면 갈 필요 없음
+				}
+			}else{
+				this->gcost[movedIndex] = gcost;
+			}
+			nextTravelPoints[curPoint.index] = movedIndex;
+			auto fcost = gcost + hcost;
+			nearPointQueue.push(PathPoint(movedIndex, fcost));
+		}
+		return false;
+	}
+private:
+	int GetCostToTarget(int index) {
+		int x, y;
+		worldManager->GetPosFormWorldIndex(index, x, y);
+		return GetCostToTarget(x, y);
+	}
+
+	int GetCostToTarget(int x, int y) {
+		return abs(x - targetX) + abs(y - targetY);
+	}
+
+	void ResetNextPos() {
+		nextPosIdx = startIdx;
+		nextTravelPoints.clear();
+	}
+	
+	/// <summary>
+	/// 해당 index 위치에서 목적지까지 직진거리로 갈 수 있는지 반환합니다.
+	/// </summary>
+	bool CanMoveStraight(int index) {
+		int x, y;
+		worldManager->GetPosFormWorldIndex(index, x, y);
+		return CanMoveStraight(x, y);
+	}
+
+	/// <summary>
+	/// x, y 위치에서 목적지까지 직진거리로 갈 수 있는지 반환합니다.
+	/// </summary>
+	bool CanMoveStraight(int x, int y) {
+		while (x != targetX || y != targetY) {
+			auto xOff = x - targetX;
+			auto yOff = y - targetY;
+			if (abs(xOff) > abs(yOff)) {
+				xOff > 0 ? ++x : xOff < 0 ? --x : x;
+			} else {
+				yOff > 0 ? ++y : yOff < 0 ? --y : y;
+			}
+			if (worldManager->GetCollidable(x, y)) {
+				return false;
+			}
+		}
+		return true;
+	}
+};
+
 bool IsMonster(int id) {
 	return MONSTER_ID_START < id;
 }
@@ -679,14 +920,52 @@ void AddSendingData(int targetId, void* buf);
 
 void UpdateSector(int actorId, int prevX, int prevY, int x, int y);
 
-bool CallLuaFunction(lua_State* L, int argCount, int resultCount) {
-	const int res = lua_pcall(L, argCount, resultCount, 0);
-	if (0 != res) {
-		cout << "LUA error in exec: " << lua_tostring(L, -1) << endl;
+bool DebugLua(lua_State* L, int err) {
+	if (err) {
+		auto msg = lua_tostring(L, -1);
+		cout << "LUA error in exec: " << msg << endl;
 		lua_pop(L, 1);
+		
+		switch (err) {
+		case LUA_ERRFILE:
+			printf("couldn't open the given file\n");
+			exit(-1);
+		case LUA_ERRSYNTAX:
+			printf("syntax error during pre-compilation\n");
+			luaL_traceback(L, L, msg, 1);
+			printf("%s\n", lua_tostring(L, -1));
+			exit(-1);
+		case LUA_ERRMEM:
+			printf("memory allocation error\n");
+			exit(-1);
+		case LUA_ERRRUN:
+		{
+			const char* msg = lua_tostring(L, -1);
+			luaL_traceback(L, L, msg, 1);
+			printf("LUA_ERRRUN %s\n", lua_tostring(L, -1));
+			exit(-1);
+		}
+		case LUA_ERRERR:
+			printf("error while running the error handler function\n");
+			exit(-1);
+		default:
+			printf("unknown error %i\n", err);
+			exit(-1);
+		}
 		return false;
 	}
 	return true;
+}
+
+bool CallLuaFunction(lua_State* L, int argCount, int resultCount) {
+	//lua_getglobal(L, "debug");
+	//lua_getfield(L, -1, "traceback");
+	//lua_remove(L, -2);
+	//int errindex = -argCount - 2;
+	//lua_insert(L, errindex);
+	int errindex = 0;
+	const int res = lua_pcall(L, argCount, resultCount, errindex);
+	return DebugLua(L, res);
 }
 
 class Player : public Actor {
@@ -728,7 +1007,6 @@ public:
 		damage = 1;
 	}
 	
-	void Move(DIRECTION dir) override;
 	void SetPos(int x, int y) override;
 	void SendStatChange() override;
 
@@ -926,13 +1204,6 @@ protected:
 		lua_pushnumber(L, actorId);
 		CallLuaFunction(L, 1, 0);
 	}
-	
-	void OnNearActorWithSelfMove(int actorId) override {
-		lock_guard<mutex> lock(luaLock);
-		lua_getglobal(L, "OnNearActorWithSelfMove");
-		lua_pushnumber(L, actorId);
-		CallLuaFunction(L, 1, 0);
-	}
 
 	bool TakeDamage(int attackerId) override {
 		lock_guard<mutex> lock(luaLock);
@@ -955,22 +1226,19 @@ protected:
 		return &miniOver;
 	}
 	int GetHpWithoutLock() const {
-		lua_getglobal(L, "GetHp");
-		CallLuaFunction(L, 0, 1);
+		lua_getglobal(L, "mHp");
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
 	}
 	int GetLevelWithoutLock() const {
-		lua_getglobal(L, "GetLevel");
-		CallLuaFunction(L, 0, 1);
+		lua_getglobal(L, "mLevel");
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
 	}
 	int GetExpWithoutLock() const {
-		lua_getglobal(L, "GetExp");
-		CallLuaFunction(L, 0, 1);
+		lua_getglobal(L, "mExp");
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
@@ -989,8 +1257,7 @@ protected:
 	}
 	int GetDamage() override {
 		lock_guard<mutex> lock(luaLock);
-		lua_getglobal(L, "GetDamage");
-		CallLuaFunction(L, 0, 1);
+		lua_getglobal(L, "mDamage");
 		int value = lua_tonumber(L, -1);
 		lua_pop(L, 1);
 		return value;
@@ -998,17 +1265,17 @@ protected:
 	void SetExp(int exp) override {
 		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, exp);
-		lua_setglobal(L, "my_exp");
+		lua_setglobal(L, "mExp");
 	}
 	void SetLevel(int level) override {
 		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, level);
-		lua_setglobal(L, "my_level");
+		lua_setglobal(L, "mLevel");
 	}
 	void SetHp(int hp) override {
 		lock_guard<mutex> lock(luaLock);
 		lua_pushnumber(L, hp);
-		lua_setglobal(L, "my_hp");
+		lua_setglobal(L, "mHp");
 	}
 private:
 	void SendStatChange() override {
@@ -1027,6 +1294,13 @@ private:
 				Die();
 				});
 		}
+	}
+	
+	void OnNearActorWithSelfMove(int actorId) override {
+		lock_guard<mutex> lock(luaLock);
+		lua_getglobal(L, "OnNearActorWithSelfMove");
+		lua_pushnumber(L, actorId);
+		CallLuaFunction(L, 1, 0);
 	}
 };
 
@@ -1117,6 +1391,13 @@ int LuaAddEventNpcRandomMove(lua_State* L) {
 		});
 	return 1;
 }
+int LuaIsMovable(lua_State* L) {
+	int x = lua_tonumber(L, -2);
+	int y = lua_tonumber(L, -1);
+	lua_pop(L, 3);
+	lua_pushboolean(L, worldManager.GetCollidable(x, y));
+	return 1;
+}
 
 class Npc : public NonPlayer {
 protected:
@@ -1136,7 +1417,6 @@ public:
 	}
 
 	void Update() override;
-	void Move(DIRECTION dir) override;
 };
 
 class Monster : public NonPlayer {
@@ -1256,7 +1536,7 @@ int LuaSendStatChange(lua_State* L) {
 }
 
 void BufOver::Recycle() {
-	_ASSERT(manager != nullptr, "manager가 null입니다");
+	_ASSERT(manager != nullptr&&"manager가 null입니다");
 	manager->Recycle(this);
 }
 
@@ -1515,7 +1795,8 @@ void UpdateSector(int actorId, int prevX, int prevY, int x, int y) {
 void NonPlayer::InitLua(const char* path) {
 	L = luaL_newstate();
 	luaL_openlibs(L);
-	luaL_loadfile(L, path);
+	int luaError = luaL_loadfile(L, path);
+	
 	CallLuaFunction(L, 0, 0);
 
 	// API함수들은 락걸린 LUA함수가 호출하기에 락이 필요없다.
@@ -1531,6 +1812,7 @@ void NonPlayer::InitLua(const char* path) {
 	lua_register(L, "LuaPrint", LuaPrint);
 	lua_register(L, "LuaAddEventNpcRandomMove", LuaAddEventNpcRandomMove);
 	lua_register(L, "LuaAddEventSendMess", LuaAddEventSendMess);
+	lua_register(L, "LuaIsMovable", LuaIsMovable);
 
 	lua_getglobal(L, "SetId");
 	lua_pushnumber(L, id);
@@ -1616,22 +1898,6 @@ void Npc::Update() {
 	Move(static_cast<DIRECTION>(rand() % 4));
 }
 
-void Npc::Move(DIRECTION dir) {
-	auto x = this->x;
-	auto y = this->y;
-	switch (dir) {
-	case D_E: if (x < WORLD_WIDTH - 1) ++x;
-		break;
-	case D_W: if (x > 0) --x;
-		break;
-	case D_S: if (y < WORLD_HEIGHT - 1) ++y;
-		break;
-	case D_N: if (y > 0) --y;
-		break;
-	}
-	SetPos(x, y);
-}
-
 void Monster::Update() {
 	// TODO 안자고 돌아다님
 	//if (GetIdFromOverlappedSector(id).empty()){
@@ -1691,22 +1957,6 @@ Player::Player(int id): Actor(id) {
 		}
 		CallRecv();
 	};
-}
-
-void Player::Move(DIRECTION dir) {
-	auto x = this->x;
-	auto y = this->y;
-	switch (dir){
-	case D_N: if (y > 0) y--;
-		break;
-	case D_S: if (y < (WORLD_HEIGHT - 1)) y++;
-		break;
-	case D_W: if (x > 0) x--;
-		break;
-	case D_E: if (x < (WORLD_WIDTH - 1)) x++;
-		break;
-	}
-	SetPos(x, y);
 }
 
 void Player::SetPos(int x, int y) {
@@ -1876,7 +2126,6 @@ void Worker(HANDLE hIocp) {
 			continue;
 		}
 		auto over = reinterpret_cast<MiniOver*>(reinterpret_cast<char*>(recvOver)-sizeof(void*)); // vtable 로 인해 포인터 바이트수 만큼 뺌
-		cout << over << endl;
 
 		over->callback(recvBufSize);
 		over->Recycle();

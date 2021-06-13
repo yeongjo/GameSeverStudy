@@ -24,15 +24,3 @@ end
 function OnNearActorWithSelfMove(p_id)
 	
 end
-function GetHp()
-	return my_hp
-end
-function GetLevel()
-	return my_level
-end
-function GetExp()
-	return my_exp
-end
-function GetDamage()
-	return my_damage
-end

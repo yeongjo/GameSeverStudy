@@ -15,6 +15,7 @@ ESoloMove_Roaming = 1
 mSoloMove = ESoloMove_Fixing
 mTargetActorId = -1
 
+
 function SetId(x)
 	mId = x
 	mInitX = LuaGetX(mId)
@@ -57,7 +58,9 @@ function RandomMove()
 	else
 		mY = mY-1
 	end
-	LuaSetPos(mId, mX, mY)
+	if(LuaIsMovable(mX, mY)) then
+		LuaSetPos(mId, mX, mY)
+	end
 end
 
 function Tick(actorIdArray)
@@ -65,7 +68,7 @@ function Tick(actorIdArray)
 		if(mTargetActorId ~= -1) then
 			targetActorX = LuaGetX(mTargetActorId)
 			targetActorY = LuaGetY(mTargetActorId)
-			LuaPrint(mTargetActorId..": "..targetActorX..","..targetActorY.."\n")
+			--LuaPrint(mTargetActorId..": "..targetActorX..","..targetActorY.."\n")
 		else
 			if(ESoloMove_Roaming == mSoloMove) then
 				RandomMove()
@@ -101,7 +104,6 @@ function Tick(actorIdArray)
 		end
 	end
 	
-	--LuaPrint("center: "..targetActorX..","..mX.."/"..targetActorY..","..mY.."\n")
 	if(targetActorX - mX > 0) then
 		mX = mX+1
 	elseif(targetActorX - mX < 0) then
@@ -111,8 +113,9 @@ function Tick(actorIdArray)
 	elseif(targetActorY - mY < 0) then
 		mY = mY-1
 	end
-	--LuaPrint("after tick: "..mX..","..mY.."\n")
-	LuaSetPos(mId, mX, mY)
+	if(LuaIsMovable(mX, mY)) then
+		LuaSetPos(mId, mX, mY)
+	end
 end
 
 function OnNearActorWithPlayerMove(playerId)
@@ -144,20 +147,7 @@ function TakeDamage(playerId, damage)
 		LuaSendStatChange(playerId, mId, playerhp, playerlevel, playerexp); -- °æÇèÄ¡ ½Àµæ
 		result = false
 	end
-	LuaPrint("take_damage("..playerId..":"..damage..","..mHp..")\n")
+	--LuaPrint("take_damage("..playerId..":"..damage..","..mHp..")\n")
 	LuaSendStatChange(mId, mId, mHp, mLevel, mExp);
 	return result
-end
-
-function GetHp()
-	return mHp
-end
-function GetLevel()
-	return mLevel
-end
-function GetExp()
-	return mExp
-end
-function GetDamage()
-	return mDamage
 end

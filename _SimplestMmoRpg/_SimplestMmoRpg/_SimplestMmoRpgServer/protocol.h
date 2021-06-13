@@ -157,3 +157,4 @@ constexpr int MESSAGE_MAX_BUFFER= MAX_STR_LEN;
 constexpr int MAX_NAME= MAX_ID_LEN;
 enum DIRECTION { D_N, D_S, D_W, D_E, D_NO };
 enum ETile { Empty, Wall };
+constexpr const char* MAP_PATH = "../../map.bmp";
