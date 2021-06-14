@@ -1,6 +1,8 @@
 mId =  -1
 mInitX = -1
 mInitY = -1
+mX = -1
+mY = -1
 mAgroDistance = 0
 mHp = 0
 mLevel = 0
@@ -14,12 +16,17 @@ ESoloMove_Fixing = 0
 ESoloMove_Roaming = 1
 mSoloMove = ESoloMove_Fixing
 mTargetActorId = -1
+mPathTargetX = -1
+mPathTargetY = -1
 
 
 function SetId(x)
 	mId = x
 	mInitX = LuaGetX(mId)
+	mX = mInitX
 	mInitY = LuaGetY(mId)
+	mY = mInitY
+	--LuaPrint("SetId:"..mId..": "..mX..","..mY.."\n")
 	InitStat()
 end
 
@@ -71,17 +78,18 @@ function Tick(actorIdArray)
 			--LuaPrint(mTargetActorId..": "..targetActorX..","..targetActorY.."\n")
 		else
 			if(ESoloMove_Roaming == mSoloMove) then
+				LuaPrint("RandomMove:"..mId..": "..mX..","..mY.."\n")
 				RandomMove()
+				LuaPrint("after RandomMove:"..mId..": "..mX..","..mY.."\n")
 			end
 			return
 		end
-	else
-		mX = LuaGetX(mId)
-		mY = LuaGetY(mId)
+	elseif(mTargetActorId == -1) then
 		--LuaPrint("CALL tick: "..mX..","..mY.."\n")
 		minDistance = mAgroDistance
 		targetActorX = -1
 		targetActorY = -1
+		minTargetId = -1
 		for i = 1, #actorIdArray do
 			local actorId = actorIdArray[i]
 			--LuaPrint("tick loop["..i)
@@ -93,8 +101,10 @@ function Tick(actorIdArray)
 				minDistance = curDistance
 				targetActorX = actorX
 				targetActorY = actorY
+				minTargetId = actorId
 			end
 		end
+		mTargetActorId = minTargetId
 		if(targetActorX == -1 or targetActorY == -1) then
 			--어그로 안끌릴때 행동
 			if(ESoloMove_Roaming == mSoloMove) then
@@ -104,6 +114,21 @@ function Tick(actorIdArray)
 		end
 	end
 	
+	-- 플레이어에게 다가가는 행동
+	if(mPathTargetX == -1) then
+		mPathTargetX = targetActorX
+		mPathTargetY = targetActorY
+		LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+	end
+	LuaPrint("x: "..mX.." y:"..mY.." mPathTargetX: "..mPathTargetX.." mPathTargetY:"..mPathTargetY.."\n")
+	if(mX == mPathTargetX and mY == mPathTargetY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
+		mPathTargetX = LuaGetX(mTargetActorId)
+		targetActorX = mPathTargetX
+		mPathTargetY = LuaGetY(mTargetActorId)
+		targetActorY = mPathTargetY
+		LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+	end
+	--[[
 	if(targetActorX - mX > 0) then
 		mX = mX+1
 	elseif(targetActorX - mX < 0) then
@@ -116,6 +141,7 @@ function Tick(actorIdArray)
 	if(LuaIsMovable(mX, mY)) then
 		LuaSetPos(mId, mX, mY)
 	end
+	]]
 end
 
 function OnNearActorWithPlayerMove(playerId)
@@ -124,8 +150,6 @@ end
 function OnNearActorWithSelfMove(playerId)
 	playerX = LuaGetX(playerId)
 	playerY = LuaGetY(playerId)
-	mX = LuaGetX(mId)
-	mY = LuaGetY(mId)
 
 	if(playerX == mX) then
 		if(playerY == mY) then

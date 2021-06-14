@@ -47,6 +47,8 @@
 #include <map>
 #include <queue>
 #include <random>
+#include <sstream>
+#include <stack>
 #include <unordered_set>
 class PathFindHelper;
 class Monster;
@@ -555,7 +557,7 @@ public:
 			for (size_t x = 0; x < image.width; x++) {
 				world[y*image.width+x] = ETile::Empty;
 				switch (image.GetPixel(x, y).r) {
-				case 0: {
+				case 255: {
 					world[y * image.width +x] = ETile::Wall;
 					break;
 				}
@@ -599,6 +601,9 @@ public:
 
 	Monster* GetMonster(int id);
 	bool GetCollidable(int x, int y) {
+		if(x < 0 || width <= x || y < 0 || height <= y){
+			return true;
+		}
 		auto tile = world[y*width+x];
 		return tile == Wall;
 	}
@@ -609,9 +614,16 @@ public:
 	int GetWorldIndex(int x, int y) {
 		return y* width + x;
 	}
-	int GetPosFormWorldIndex(int index, int& x, int& y) {
+	void GetPosFormWorldIndex(int index, int& x, int& y) {
 		y = index / width;
 		x = index - (y * width);
+	}
+	string GetPosString(int index) {
+		int x, y;
+		GetPosFormWorldIndex(index, x, y);
+		stringstream ss;
+		ss << "("<< x << "," << y << ")";
+		return ss.str();
 	}
 	int GetWidth() { return width; }
 	int GetHeight() { return height; }
@@ -626,6 +638,15 @@ Actor* GetActor(int id) {
 Player* GetPlayer(int id) {
 	_ASSERT(0 < id && id < NPC_ID_START);
 	return reinterpret_cast<Player*>(actors[id]);
+}
+
+Monster* GetMonster(int id) {
+	_ASSERT(MONSTER_ID_START <= id && id < MONSTER_ID_START+MAX_MONSTER);
+	return reinterpret_cast<Monster*>(actors[id]);
+}
+
+int Distance(int x, int y, int x2, int y2) {
+	return abs(x - x2) + abs(y - y2);
 }
 struct Actor {
 	int		id;
@@ -732,7 +753,7 @@ public:
 	}
 
 	virtual bool IsMovableTile(int x, int y) {
-		return worldManager.GetCollidable(x, y);
+		return !worldManager.GetCollidable(x, y);
 	}
 
 	/// <summary>
@@ -744,6 +765,9 @@ public:
 		return true;
 	}
 
+	virtual void LuaLock(){}
+	virtual void LuaUnLock(){}
+
 	virtual int GetHp() { return -1; }
 	virtual int GetLevel() { return -1; }
 	virtual int GetExp() { return -1; }
@@ -754,7 +778,6 @@ public:
 	virtual void SetHp(int hp) {}
 protected:
 	vector<int>& CopyViewSetToOldViewList() {
-		lock_guard<mutex> lock(oldNewViewListLock);
 		lock_guard<mutex> lock2(viewSetLock);
 		oldViewList.resize(viewSet.size());
 		std::copy(viewSet.begin(), viewSet.end(), oldViewList.begin());
@@ -762,106 +785,206 @@ protected:
 	}
 };
 
-class PathFinder {
-	PathFindHelper* pathFindHelper;
-public:
-	
-};
-
 class PathFindHelper {
-	class PathPoint {
-	public:
-		int index, cost;
-		PathPoint(int index, int cost):index(index), cost(cost){}
+public:
+	enum class FindStatus {
+		Finding, CantFindWay, FoundWay
+	};
+//protected:
+	struct PathPoint {
+		int index, fcost, gcost, parent;
+		PathPoint(int index, int fcost, int gcost, int parent):index(index), fcost(fcost), gcost(gcost), parent(parent){}
+		PathPoint(){}
 		constexpr bool operator<(const PathPoint& a) const {
-			return cost < a.cost;
+			return fcost > a.fcost;
 		}
 		constexpr bool operator>(const PathPoint& a) const {
-			return cost > a.cost;
+			return fcost < a.fcost;
+		}
+		constexpr bool operator==(const PathPoint& a) const {
+			return index == a.index;
+		}
+		string ToString() {
+			stringstream ss;
+			ss << "gcost: " << gcost << "parent: " << parent;
+			return ss.str();
 		}
 	};
-	priority_queue<PathPoint> nearPointQueue;
-	unordered_map<int, int> nextTravelPoints;
-	unordered_map<int, int> gcost; // 벽 포함한 지나온길 코스트
-	int targetX, targetY;
-	int startIdx;
-	int currentIdx, nextPosIdx;
-	WorldManager* worldManager;
+public:
+	class PathQueue : public removable_priority_queue<PathPoint> {
+	public:
+		PathPoint* Find(int index) {
+			auto it = std::find_if(this->c.begin(), this->c.end(), [=](PathPoint& path) {
+				return path.index == index;
+			});
+			if (it != this->c.end()) {
+				return &*it;
+			}
+			return nullptr;
+		}
+		bool Replace(const PathPoint& value) {
+			auto it = std::find(this->c.begin(), this->c.end(), value);
+			if (it != this->c.end()) {
+				*it = value;
+				Sort();
+				return true;
+			}
+			return false;
+		}
 
+		void Sort() {
+			std::sort(this->c.begin(), this->c.end());
+		}
+
+		void Clear() {
+			this->c.clear();
+		}
+		void Print(WorldManager* worldManager) {
+			for(auto t : this->c){
+				cout << worldManager->GetPosString(t.index) << ",cost:" << t.fcost <<  "/";
+			}
+		}
+	};
 protected:
+	PathQueue openPoints;
+	unordered_map<int, PathPoint> closePoints;
+	int targetX, targetY;
+	int targetIdx;
+	int startIdx;
+	int goalPosIdx = -1, prevPosIdx;
+	WorldManager* worldManager;
+	vector<int> straightPath;
+	FindStatus findStatus;
+	
 	PathFindHelper(){}
 
 public:
-	static PathFindHelper* Get() {
-		return new PathFindHelper;
-	}
-	
-	void SetWorld(WorldManager* worldManager) {
-		this->worldManager = worldManager;
+	static PathFindHelper* Get(WorldManager* worldManager) {
+		auto result = new PathFindHelper;
+		result->worldManager = worldManager;
+		return result;
 	}
 
 	void SetStartAndTarget(int startX, int startY, int targetX, int targetY) {
-		currentIdx = startIdx = worldManager->GetWorldIndex(startX, startY);
-		gcost.clear();
-		gcost[startIdx] = 0;
-		ResetNextPos();
+		prevPosIdx = startIdx = worldManager->GetWorldIndex(startX, startY);
+		closePoints.clear();
+		goalPosIdx = -1;
 		this->targetX = targetX;
 		this->targetY = targetY;
-		while (!nearPointQueue.empty()) {
-			nearPointQueue.pop();
-		}
+		targetIdx = worldManager->GetWorldIndex(targetX, targetY);
+		openPoints.Clear();
+		openPoints.push(PathPoint(startIdx, 0, 0, -1));
+		findStatus = FindStatus::Finding;
+		//cout << "SetStartAndTarget() startX" << startX << ", startY" << startY << ", targetX" << targetX << ", targetY" << targetY << ": openPointsSize:" << openPoints.size() << endl;
 	}
 
 	void GetNextPos(int& x, int& y) {
-		auto findNextPosIter = nextTravelPoints.find(nextPosIdx);
-		if (findNextPosIter == nextTravelPoints.end()) {
+		if(goalPosIdx == -1){
 			return;
 		}
-		worldManager->GetPosFormWorldIndex(nextPosIdx, x, y);
-		nextPosIdx = findNextPosIter->second;
+
+		vector<int> findingPath;
+		FindPrevPath(goalPosIdx, findingPath);
+		/*cout << "x:" << x << "y:" << y;
+		cout << " 찾아진 길: ";
+		for (int i = findingPath.size() - 1;  0 <= i; --i) {
+			cout << worldManager->GetPosString(findingPath[i]);
+		}
+		cout << ": ";*/
+		int prevPathX, prevPathY;
+		for (int i = 0; i < findingPath.size() - 1; ++i) {
+			// 목적지부터 나 있는 곳까지 이동해서 직진으로 도착할 수 있는 곳이 있으면 거기로는 직선으로 이동한다
+			worldManager->GetPosFormWorldIndex(findingPath[i], prevPathX, prevPathY);
+			if(x == prevPathX && y == prevPathY){
+				continue;
+			}
+			if(CanMoveStraight( x, y, prevPathX, prevPathY)){
+				worldManager->GetPosFormWorldIndex(findingPath[i], x, y);
+				break;
+			}
+		}
+		//cout << "다음 위치->" << x << "," << y << endl;
+	}
+
+	void FindPrevPath(int posIdx, vector<int>& path) {
+		auto findNextPosIter = closePoints.find(posIdx);
+		if (findNextPosIter == closePoints.end()) {
+			return;
+		}
+		path.push_back(posIdx);
+		FindPrevPath(findNextPosIter->second.parent, path);
 	}
 
 	/// <summary>
 	/// 한 사이클 길을 찾습니다.
 	/// </summary>
-	/// <returns>길을 찾으면 true를 반환합니다</returns>
-	bool Once() {
-		if(nearPointQueue.empty()){
-			return false;
+	/// <returns>길을 찾거나 찾을 이유가 없으면 true를 반환합니다</returns>
+	FindStatus FindWayOnce() {
+		if(findStatus == FindStatus::FoundWay || openPoints.empty()){
+			findStatus = findStatus == FindStatus::Finding ? FindStatus::CantFindWay : FindStatus::FoundWay;
+			return findStatus;
 		}
-		auto curPoint = nearPointQueue.top();
-		currentIdx = curPoint.index;
+		//cout << "FindWayOnce: ";
+		//cout << "openPoints: ";
+		//openPoints.Print(worldManager);
+		//cout << "closePoints: ";
+		//for (auto closePoint : closePoints) {
+		//	cout << worldManager->GetPosString(closePoint.second.index) << "/";
+		//}
+		//cout << endl;
+
+		auto curPoint = openPoints.top();
+		openPoints.pop();
+		goalPosIdx = curPoint.index;
+		closePoints[curPoint.index] = curPoint;
 		if(CanMoveStraight(curPoint.index)){
-			return true;
+			if(targetIdx != curPoint.index){
+				closePoints[targetIdx] = PathPoint(targetIdx, 0, 0, curPoint.index);
+			}
+			goalPosIdx = targetIdx;
+			findStatus = FindStatus::FoundWay;
+			return findStatus;
 		}
-		nearPointQueue.pop();
+		
 		auto worldWidth = worldManager->GetWidth();
+		auto worldHeight = worldManager->GetHeight();
+		int curX, curY;
+		worldManager->GetPosFormWorldIndex(curPoint.index, curX, curY);
 		int offset[] = { -1,1,-worldWidth,worldWidth };
-		auto prevIndex = curPoint.index;
+		int offsetX[] = { -1,1,0,0 };
+		int offsetY[] = { 0,0,-1,1 };
 		for (int i = 0; i < 4; i++) {
-			auto movedIndex = prevIndex + offset[i];
-			if (movedIndex < 0 || worldWidth <= movedIndex||
-				worldManager->GetCollidable(movedIndex)) {
+			auto movedIdx = curPoint.index + offset[i];
+			auto movedX = curX + offsetX[i];
+			auto movedY = curY + offsetY[i];
+			if (movedX < 0 || worldWidth <= movedX ||
+				movedY < 0 || worldHeight <= movedY ||
+				worldManager->GetCollidable(movedIdx) || 
+				closePoints.find(movedIdx) != closePoints.end()) {
+				// 갈 수 없는 길이면 넘기기
 				continue;
 			}
-			auto hcost = GetCostToTarget(movedIndex);
-			auto gcost = 1 + this->gcost[prevIndex];
-			auto movedIndexGcost = this->gcost.find(movedIndex);
-			auto isGcostExist = movedIndexGcost != this->gcost.end();
-			if(isGcostExist){
-				if(movedIndexGcost->second < gcost){
-					movedIndexGcost->second = gcost;
-				}else{
-					continue; // 가는길이 비용이 더 높다면 갈 필요 없음
-				}
-			}else{
-				this->gcost[movedIndex] = gcost;
+			if (targetIdx == movedIdx) {
+				// 길찾기 성공
+				closePoints[movedIdx] = PathPoint(movedIdx, 0, 0, curPoint.index);
+				goalPosIdx = movedIdx;
+				findStatus = FindStatus::FoundWay;
+				return findStatus;
 			}
-			nextTravelPoints[curPoint.index] = movedIndex;
+			auto hcost = GetCostToTarget(movedIdx);
+			auto gcost = 1 + curPoint.gcost;
 			auto fcost = gcost + hcost;
-			nearPointQueue.push(PathPoint(movedIndex, fcost));
+			auto movedIndexGcost = openPoints.Find(movedIdx);
+			if (movedIndexGcost) {
+				if (movedIndexGcost->gcost < gcost) {
+					openPoints.Replace(PathPoint(movedIdx, fcost, gcost, curPoint.index));
+				}
+			} else {
+				openPoints.emplace(PathPoint(movedIdx, fcost, gcost, curPoint.index));
+			}
 		}
-		return false;
+		findStatus = FindStatus::Finding;
+		return findStatus;
 	}
 private:
 	int GetCostToTarget(int index) {
@@ -872,11 +995,6 @@ private:
 
 	int GetCostToTarget(int x, int y) {
 		return abs(x - targetX) + abs(y - targetY);
-	}
-
-	void ResetNextPos() {
-		nextPosIdx = startIdx;
-		nextTravelPoints.clear();
 	}
 	
 	/// <summary>
@@ -892,9 +1010,16 @@ private:
 	/// x, y 위치에서 목적지까지 직진거리로 갈 수 있는지 반환합니다.
 	/// </summary>
 	bool CanMoveStraight(int x, int y) {
+		return CanMoveStraight(x, y, targetX, targetY);
+	}
+
+	/// <summary>
+	/// x, y 위치에서 목적지까지 직진거리로 갈 수 있는지 반환합니다.
+	/// </summary>
+	bool CanMoveStraight(int x, int y, int targetX, int targetY) {
 		while (x != targetX || y != targetY) {
-			auto xOff = x - targetX;
-			auto yOff = y - targetY;
+			auto xOff = targetX - x;
+			auto yOff = targetY - y;
 			if (abs(xOff) > abs(yOff)) {
 				xOff > 0 ? ++x : xOff < 0 ? --x : x;
 			} else {
@@ -904,6 +1029,7 @@ private:
 				return false;
 			}
 		}
+		
 		return true;
 	}
 };
@@ -1220,6 +1346,12 @@ protected:
 
 	void Die() override;
 
+	void LuaLock() override {
+		luaLock.lock();
+	}
+	void LuaUnLock() override {
+		luaLock.unlock();
+	}
 	void SetPos(int x, int y) override;
 	MiniOver* GetOver() override {
 		memset(&miniOver.over, 0, sizeof(miniOver.over));
@@ -1317,59 +1449,61 @@ int LuaAddEventSendMess(lua_State* L) {
 }
 
 int LuaTakeDamage(lua_State* L) {
-	int obj_id = lua_tonumber(L, -2);
-	int attackerId = lua_tonumber(L, -1);
+	int obj_id = lua_tointeger(L, -2);
+	int attackerId = lua_tointeger(L, -1);
 	lua_pop(L, 3);
 	GetActor(obj_id)->TakeDamage(attackerId);
 	return 1;
 }
 
 int LuaGetX(lua_State* L) {
-	int obj_id = lua_tonumber(L, -1);
+	int obj_id = lua_tointeger(L, -1);
 	lua_pop(L, 2);
 	int x = GetActor(obj_id)->x;
-	lua_pushnumber(L, x);
+	lua_pushinteger(L, x);
 	return 1;
 }
 int LuaGetY(lua_State* L) {
-	int obj_id = lua_tonumber(L, -1);
+	int obj_id = lua_tointeger(L, -1);
 	lua_pop(L, 2);
 	int y = GetActor(obj_id)->y;
-	lua_pushnumber(L, y);
+	lua_pushinteger(L, y);
 	return 1;
 }
 
 int LuaSetPos(lua_State* L) {
-	int obj_id = lua_tonumber(L, -3);
-	int x = lua_tonumber(L, -2);
-	int y = lua_tonumber(L, -1);
+	int obj_id = lua_tointeger(L, -3);
+	int x = lua_tointeger(L, -2);
+	int y = lua_tointeger(L, -1);
 	lua_pop(L, 3);
+	GetActor(obj_id)->LuaUnLock();
 	GetActor(obj_id)->SetPos(x, y);
+	GetActor(obj_id)->LuaLock();
 	return 1;
 }
 
 int LuaSendMess(lua_State* L) {
-	int recverId = lua_tonumber(L, -3);
-	int senderId = lua_tonumber(L, -2);
+	int recverId = lua_tointeger(L, -3);
+	int senderId = lua_tointeger(L, -2);
 	const char* mess = lua_tostring(L, -1);
 	lua_pop(L, 4);
 	GetPlayer(recverId)->SendChat(senderId, mess);
 	return 1;
 }
 int LauGetHp(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
+	int targetId = lua_tointeger(L, -1);
 	lua_pop(L, 2);
 	lua_pushinteger(L, GetActor(targetId)->GetHp());
 	return 1;
 }
 int LuaGetLevel(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
+	int targetId = lua_tointeger(L, -1);
 	lua_pop(L, 2);
 	lua_pushinteger(L, GetActor(targetId)->GetLevel());
 	return 1;
 }
 int LuaGetExp(lua_State* L) {
-	int targetId = lua_tonumber(L, -1);
+	int targetId = lua_tointeger(L, -1);
 	lua_pop(L, 2);
 	lua_pushinteger(L, GetActor(targetId)->GetExp());
 	return 1;
@@ -1383,8 +1517,8 @@ int LuaPrint(lua_State* L) {
 }
 
 int LuaAddEventNpcRandomMove(lua_State* L) {
-	int p_id = lua_tonumber(L, -2);
-	int delay = lua_tonumber(L, -1);
+	int p_id = lua_tointeger(L, -2);
+	int delay = lua_tointeger(L, -1);
 	lua_pop(L, 3);
 	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
 		GetActor(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
@@ -1392,10 +1526,10 @@ int LuaAddEventNpcRandomMove(lua_State* L) {
 	return 1;
 }
 int LuaIsMovable(lua_State* L) {
-	int x = lua_tonumber(L, -2);
-	int y = lua_tonumber(L, -1);
+	int x = lua_tointeger(L, -2);
+	int y = lua_tointeger(L, -1);
 	lua_pop(L, 3);
-	lua_pushboolean(L, worldManager.GetCollidable(x, y));
+	lua_pushboolean(L, !worldManager.GetCollidable(x, y));
 	return 1;
 }
 
@@ -1421,7 +1555,11 @@ public:
 
 class Monster : public NonPlayer {
 protected:
+	PathFindHelper* pathFindHelper = nullptr; // TODO 모든 NPC가 길을 찾는게 아니기에 풀러에서 가져와서 쓰면서 메모리 절약가능
+	mutex monsterLock;
+	
 	Monster(int id) : NonPlayer(id) {
+		pathFindHelper = PathFindHelper::Get(&worldManager);
 	}
 public:
 	static Monster* Get(int id) {
@@ -1465,7 +1603,28 @@ public:
 		CallLuaFunction(L, 0, 0);
 	}
 
+	void SetPathStartAndTarget(int startX, int startY, int targetX, int targetY) const {
+		pathFindHelper->SetStartAndTarget(startX, startY, targetX, targetY);
+	}
+
 	void Update() override;
+
+	/// <summary>
+	/// 해당 방향으로 한 칸 이동합니다.
+	/// </summary>
+	/// <param name="direcX"></param>
+	/// <param name="direcY"></param>
+	void MoveTo(int targetX, int targetY) {
+		int tx = x, ty = y;
+		auto offX = targetX - tx;
+		auto offY = targetY - ty;
+		if(abs(offX) > abs(offY)){
+			offX > 0 ? ++tx : offX < 0 ? --tx : tx;
+		}else{
+			offY > 0 ? ++ty : offY < 0 ? --ty : ty;
+		}
+		SetPos(tx, ty);
+	}
 
 	void SetDamage(int damage) {
 		lock_guard<mutex> lock(luaLock);
@@ -1475,7 +1634,6 @@ public:
 
 	void Die() override {
 		NonPlayer::Die();
-
 	}
 };
 
@@ -1713,7 +1871,7 @@ void WakeUpNpc(int id) {
 	if (actor->isActive == false) {
 		bool old_state = false;
 		if (true == atomic_compare_exchange_strong(&actor->isActive, &old_state, true)) {
-			//cout << "wake up id: " << id << " is active: "<< actor->isActive << endl;
+			cout << "wake up id: " << id << " is active: "<< actor->isActive << endl;
 			AddNpcLoopEvent(id);
 		}
 	}
@@ -1813,9 +1971,20 @@ void NonPlayer::InitLua(const char* path) {
 	lua_register(L, "LuaAddEventNpcRandomMove", LuaAddEventNpcRandomMove);
 	lua_register(L, "LuaAddEventSendMess", LuaAddEventSendMess);
 	lua_register(L, "LuaIsMovable", LuaIsMovable);
+	lua_register(L, "LuaSetPathStartAndTarget", [](lua_State* L) {
+		auto monsterId = lua_tointeger(L, -3);
+		auto startX = GetActor(monsterId)->x;
+		auto startY = GetActor(monsterId)->y;
+		auto targetX = lua_tointeger(L, -2);
+		auto targetY = lua_tointeger(L, -1);
+		lua_pop(L, 4);
+		// TODO Actor도 길찾기 할 수 있으니 수정해야함
+		GetMonster(monsterId)->SetPathStartAndTarget(startX, startY, targetX, targetY);
+		return 1;
+	});
 
 	lua_getglobal(L, "SetId");
-	lua_pushnumber(L, id);
+	lua_pushinteger(L, id);
 	CallLuaFunction(L, 1, 0);
 
 }
@@ -1832,10 +2001,21 @@ void NonPlayer::Die() {
 }
 
 void NonPlayer::SetPos(int x, int y) {
+	if(this->x == x && this->y == y){
+		return;
+	}
 	auto prevX = this->x;
 	auto prevY = this->y;
 	this->x = x;
 	this->y = y;
+	{
+		lock_guard<mutex> lockLua(luaLock);
+		lua_pushinteger(L, this->x);
+		lua_setglobal(L, "mX");
+		lua_pushinteger(L, this->y);
+		lua_setglobal(L, "mY");
+	}
+
 	UpdateSector(id, prevX, prevY, x, y);
 	
 	newViewList = GetIdFromOverlappedSector(id);
@@ -1852,6 +2032,8 @@ void NonPlayer::SetPos(int x, int y) {
 		cout << "]한테 보임";
 #endif // NPCLOG
 
+	lock_guard<mutex> lock(oldNewViewListLock);
+	CopyViewSetToOldViewList();
 	if (newViewList.empty()){
 		SleepNpc(id); // 아무도 보이지 않으므로 취침
 #ifdef NPCLOG
@@ -1862,7 +2044,6 @@ void NonPlayer::SetPos(int x, int y) {
 		}
 		return;
 	}
-	CopyViewSetToOldViewList();
 	for (auto otherId : newViewList) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			// 플레이어의 시야에 등장
@@ -1899,21 +2080,37 @@ void Npc::Update() {
 }
 
 void Monster::Update() {
-	// TODO 안자고 돌아다님
-	//if (GetIdFromOverlappedSector(id).empty()){
-	//	SleepNpc(id);
-	//}
-	lua_getglobal(L, "Tick");
+	lock_guard<mutex> lock(monsterLock);
 	{
-		lock_guard<mutex> lock(viewSetLock);
-		if(viewSet.empty()){
-			SleepNpc(id);
-			lua_pop(L, 1);
-			return;
+		lock_guard<mutex> lockLua(luaLock);
+		lua_getglobal(L, "Tick");
+		{
+			lock_guard<mutex> lock(viewSetLock);
+			if(viewSet.empty()){
+				SleepNpc(id);
+				lua_pop(L, 1);
+				return;
+			}
+			asTable(L, viewSet.begin(), viewSet.end());
 		}
-		asTable(L, viewSet.begin(), viewSet.end());
+		CallLuaFunction(L, 1, 0);
 	}
-	CallLuaFunction(L, 1, 0);
+
+	PathFindHelper::FindStatus findWay;
+	for (size_t i = 0; i < VIEW_RADIUS; i++) {
+	//for (size_t i = 0; i < 100; i++) {
+		findWay = pathFindHelper->FindWayOnce();
+		if (PathFindHelper::FindStatus::Finding < findWay) { // 찾거나 찾을수 없었음
+			break;
+		}
+	}
+	if(findWay == PathFindHelper::FindStatus::FoundWay || 
+		findWay == PathFindHelper::FindStatus::Finding){
+		int tx = x;
+		int ty = y;
+		pathFindHelper->GetNextPos(tx, ty);
+		MoveTo(tx, ty);
+	}
 }
 
 Player::Player(int id): Actor(id) {
@@ -1969,10 +2166,11 @@ void Player::SetPos(int x, int y) {
 
 	UpdateSector(id, prevX, prevY, x, y);
 	
-	CopyViewSetToOldViewList();
-	
 	auto&& new_vl = GetIdFromOverlappedSector(id);
 
+	lock_guard<mutex> lock(oldNewViewListLock);
+	CopyViewSetToOldViewList();
+	
 	for (auto otherId : new_vl) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			//1. 새로 시야에 들어오는 플레이어
@@ -2175,7 +2373,6 @@ int main() {
 	listen(listenSocket, SOMAXCONN);
 	
 	AcceptOver accept_over;
-	cout << &accept_over << endl;
 
 	accept_over.callback = [&](int) {
 		int acceptId = Player::GetNewId(accept_over.cSocket);
