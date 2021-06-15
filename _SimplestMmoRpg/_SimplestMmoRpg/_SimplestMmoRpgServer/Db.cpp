@@ -55,17 +55,17 @@ DB::~DB() {
 }
 
 void DB::LoginQuery(const std::wstring& id, std::wstring& name, int& hp, int& level, int& exp, int& x, int& y) {
-	auto db = Get();
-	if(db){
-		db->LoginQueryInternal(id, name, hp, level, exp, x, y);
-	}
+	//auto db = Get();
+	//if(db){
+	//	db->LoginQueryInternal(id, name, hp, level, exp, x, y);
+	//}
 }
 
 void DB::UpdateStat(const std::wstring& id, int hp, int level, int exp, int x, int y) {
-	auto db = Get();
-	if (db) {
-		db->UpdateStatInternal(id, hp, level, exp, x, y);
-	}
+	//auto db = Get();
+	//if (db) {
+	//	db->UpdateStatInternal(id, hp, level, exp, x, y);
+	//}
 }
 
 void DB::LoginQueryInternal(const std::wstring& id, std::wstring& name, int& hp, int& level, int& exp, int& x, int& y) {

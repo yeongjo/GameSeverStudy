@@ -17,20 +17,21 @@ BufOverManager::~BufOverManager() {
 
 bool BufOverManager::HasSendData() {
 	return remainBufSize;
-	//std::lock_guard<std::mutex> lock(sendingDataLock);
-	//return !sendingData.empty();
 }
 
 void BufOverManager::AddSendingData(void* p) {
 	const auto packetSize = static_cast<size_t>(static_cast<unsigned char*>(p)[0]);
 	//std::cout << "AddSendingData: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
-	std::lock_guard<std::mutex> lock(sendingDataLock);
+	remainBufLock.lock();
 	if (remainBufSize == 0) {
 		AddSendTimer();
 	}
 	const auto prevSize = remainBufSize;
 	remainBufSize += packetSize;
 	const auto totalSendPacketSize = remainBufSize;
+	remainBufLock.unlock();
+
+	std::lock_guard<std::mutex> lock(sendingDataLock);
 	sendingData.resize(totalSendPacketSize);
 	memcpy(&sendingData[prevSize], p, packetSize);
 }
@@ -38,6 +39,7 @@ void BufOverManager::AddSendingData(void* p) {
 void BufOverManager::ClearSendingData() {
 	std::lock_guard<std::mutex> lock(sendingDataLock);
 	sendingData.clear();
+	std::lock_guard<std::mutex> lock2(remainBufLock);
 	remainBufSize = 0;
 }
 
@@ -103,25 +105,30 @@ void EmptyFunction(int size) {
 }
 
 void BufOverManager::SendAddedData() {
+	int totalSendDataSize;
+	{
+		std::lock_guard<std::mutex> lock(remainBufLock);
+		totalSendDataSize = remainBufSize;
+		if (totalSendDataSize == 0) {
+			return;
+		}
+		remainBufSize -= totalSendDataSize;
+		if (remainBufSize > 0) {
+			AddSendTimer();
+		}
+	}
+	
 	auto exOver = Get();
 	sendingDataLock.lock();
-	auto totalSendDataSize = remainBufSize;
-	if (totalSendDataSize == 0) {
-		sendingDataLock.unlock();
-		exOver->Recycle();
-		return;
-	}
 	//std::cout << "Send!!!!: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
 
-	remainBufSize -= totalSendDataSize;
-	if (remainBufSize > 0) {
-		AddSendTimer();
-	}
 	
 	exOver->packetBuf.resize(totalSendDataSize);
 	memcpy(&exOver->packetBuf[0], &sendingData[0], totalSendDataSize);
 	sendingData.clear();
 	sendingDataLock.unlock();
+
+	
 	
 	//exOver->callback = [=](int size){ if(size != totalSendDataSize){
 	//	std::cout << "¹¹²¿" << std::endl;

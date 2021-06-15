@@ -67,14 +67,10 @@ public:
 	}
 };
 
-constexpr int TIMER_QUEUE_COUNT = 16;
+constexpr int TIMER_QUEUE_COUNT = 512;
 
 class TimerQueueManager {
-	/// <summary>
-	/// timerLock으로 잠궈주고 사용
-	/// </summary>
 	static std::array<TimerQueue, TIMER_QUEUE_COUNT> timerQueues;
-	static std::atomic_int timerQueueIdx;
 	static HANDLE hIocp;
 
 public:
@@ -87,7 +83,4 @@ public:
 	static void Do();
 
 	static void SetIocpHandle(HANDLE hIocp);
-
-private:
-	static void NextIndex();
 };

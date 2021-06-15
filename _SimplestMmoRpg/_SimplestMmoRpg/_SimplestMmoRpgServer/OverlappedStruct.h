@@ -7,7 +7,7 @@
 #include "protocol.h"
 
 struct BufOverManager;
-typedef std::function<void(int)> iocpCallback;
+typedef std::function<void(int, int)> iocpCallback; // recvBytes, threadIndex
 
 struct MiniOver {
 	WSAOVERLAPPED	over; // 클래스 생성자에서 초기화하니 값이 원래대로 돌아온다??

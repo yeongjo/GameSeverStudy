@@ -4,7 +4,6 @@
 
 HANDLE TimerQueueManager::hIocp;
 std::array<TimerQueue, TIMER_QUEUE_COUNT> TimerQueueManager::timerQueues;
-std::atomic_int TimerQueueManager::timerQueueIdx = 0;
 
 void TimerQueue::remove_all(const int playerId) {
 	auto size = this->c.size();
@@ -24,12 +23,12 @@ void TimerQueue::remove_all(const int playerId) {
 void TimerQueueManager::Add(TimerEvent& event) {
 	if(event.checkCondition == nullptr || !event.checkCondition()){
 		// 처음 이벤트 호출하는거라 checkCondition이 false면 넣는다
-		auto& timerQueue = timerQueues[timerQueueIdx];
+		auto randIdx = rand() % TIMER_QUEUE_COUNT;
+		auto& timerQueue = timerQueues[randIdx];
 		{
 			std::lock_guard<std::mutex> lock(timerQueue.timerLock);
 			timerQueue.push(event);
 		}
-		NextIndex();
 	}
 }
 
@@ -81,8 +80,4 @@ void TimerQueueManager::Do() {
 
 void TimerQueueManager::SetIocpHandle(HANDLE hIocp) {
 	TimerQueueManager::hIocp = hIocp;
-}
-
-void TimerQueueManager::NextIndex() {
-	timerQueueIdx = (1 + timerQueueIdx) % TIMER_QUEUE_COUNT;
 }

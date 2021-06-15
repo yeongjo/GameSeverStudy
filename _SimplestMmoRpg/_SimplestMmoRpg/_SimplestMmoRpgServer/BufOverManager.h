@@ -19,6 +19,7 @@ private:
 	StructPool<std::vector<unsigned char>> sendingDataQueue;
 	std::vector<unsigned char> sendingData;
 	std::mutex sendingDataLock;
+	std::mutex remainBufLock;
 	Session* session;
 	Player* player;
 	int remainBufSize;

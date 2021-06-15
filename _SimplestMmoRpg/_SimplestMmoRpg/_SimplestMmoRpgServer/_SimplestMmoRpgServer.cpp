@@ -104,7 +104,7 @@ std::string random_string(std::size_t length) {
 	return random_string;
 }
 
-void Worker(HANDLE hIocp) {
+void Worker(HANDLE hIocp, int threadIndex) {
 	while (true) {
 		DWORD recvBufSize;
 		ULONG_PTR recvKey;
@@ -128,7 +128,7 @@ void Worker(HANDLE hIocp) {
 		}
 		auto over = reinterpret_cast<MiniOver*>(reinterpret_cast<char*>(recvOver)-sizeof(void*)); // vtable 로 인해 포인터 바이트수 만큼 뺌
 
-		over->callback(recvBufSize);
+		over->callback(recvBufSize, threadIndex);
 		over->Recycle();
 	}
 }
@@ -186,7 +186,7 @@ int main() {
 	
 	AcceptOver accept_over;
 
-	accept_over.callback = [&](int) {
+	accept_over.callback = [&](int,int) {
 		int acceptId = Player::GetNewId(accept_over.cSocket);
 		if (-1 != acceptId) {
 			auto session = Player::Get(acceptId)->GetSession();
@@ -206,7 +206,7 @@ int main() {
 	thread timer_thread(TimerQueueManager::Do);
 	vector <thread> worker_threads;
 	for (int i = 0; i < 4; ++i)
-		worker_threads.emplace_back(Worker, hIocp);
+		worker_threads.emplace_back(Worker, hIocp, i);
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);
