@@ -50,7 +50,7 @@
 //#define PLAYERLOG
 //#define NPCLOG
 //#define PLAYER_NOT_RANDOM_SPAWN
-#define DISPLAYLOG
+//#define DISPLAYLOG
 //#define DBLOG
 #include "Db.h"
 #include "LuaUtil.h"

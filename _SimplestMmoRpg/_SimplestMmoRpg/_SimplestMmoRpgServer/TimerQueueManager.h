@@ -70,14 +70,12 @@ constexpr auto THREAD_WAITTIME = std::chrono::milliseconds(10) / TIMER_QUEUE_COU
 class TimerQueueManager {
 	static std::array<TimerQueue, TIMER_QUEUE_COUNT> timerQueues;
 	static std::array<std::chrono::time_point<std::chrono::system_clock>, TIMER_QUEUE_COUNT> startTime;
-	static std::unordered_map<int, std::chrono::time_point<std::chrono::system_clock>> ignoreTime;
-	static std::mutex ignoreTimeLock;
 	static HANDLE hIocp;
 
 public:
 	static void Add(TimerEvent& event, int threadIdx);
 
-	static void RemoveAll(int playerId);
+	static void RemoveAll(int playerId); // TODO 다 지우는거 대체할방법 생각하기
 
 	static void Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback);
 

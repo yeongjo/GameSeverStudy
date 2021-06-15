@@ -18,31 +18,20 @@ BufOverManager::~BufOverManager() {
 }
 
 bool BufOverManager::HasSendData() {
-	std::lock_guard<std::mutex> lock(sendingDataLock);
-	return !sendingData.empty();
+	return sendingDataSize > 0;
 }
 
 void BufOverManager::AddSendingData(void* p, int threadIdx) {
 	const auto packetSize = static_cast<size_t>(static_cast<unsigned char*>(p)[0]);
 	//std::cout << "AddSendingData: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
 
+	const auto prevSize = sendingDataSize;
+	sendingDataSize += packetSize;
 	sendingDataLock.lock();
-	const auto prevSize = sendingData.size();
-	const auto totalSendPacketSize = prevSize + packetSize;
-	sendingData.resize(totalSendPacketSize);
+	sendingData.resize(sendingDataSize);
 	memcpy(&sendingData[prevSize], p, packetSize);
-	if (prevSize == 0) {
-		sendingDataLock.unlock();
-		AddSendTimer(threadIdx);
-		return;
-	}
 	sendingDataLock.unlock();
-	if(lastSendTime + std::chrono::milliseconds(25) < std::chrono::system_clock::now()){
-		//TimerQueueManager::Post(id, threadIdx, [this](int size, int threadIdx2) {
-		//	SendAddedData(threadIdx2);
-		//	});
-		SendAddedData(threadIdx);
-	}
+	AddSendTimer(threadIdx);
 }
 
 void BufOverManager::ClearSendingData() {
@@ -51,26 +40,21 @@ void BufOverManager::ClearSendingData() {
 }
 
 BufOver* BufOverManager::Get(int threadIdx) {
-	managedExOversLock[threadIdx].lock();
 	auto& exOverList = managedExOvers[threadIdx];
 	if(exOverList.empty()){
-		managedExOversLock[threadIdx].unlock();
 		auto bufOver = new BufOver;
 		bufOver->SetManager(this);
 		return bufOver;
 	}
 	auto back = exOverList.back();
 	exOverList.pop_back();
-	managedExOversLock[threadIdx].unlock();
 	back->InitOver();
 	return back;
 }
 
 void BufOverManager::Recycle(BufOver* usableGroup, int threadIdx) {
-	managedExOversLock[threadIdx].lock();
 	usableGroup->InitOver();
 	managedExOvers[threadIdx].push_back(usableGroup);
-	managedExOversLock[threadIdx].unlock();
 
 	if(0>--globalRecycleRemainCount){
 		size_t maxSize = 0;
@@ -155,17 +139,23 @@ void EmptyFunction(int size, int threadIdx) {
 void BufOverManager::SendAddedData(int threadIdx) {
 	
 	//std::cout << "Send!!!!: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
-	
+	if(sendingDataSize == 0){
+		return;
+	}
 	auto exOver = Get(threadIdx);
 	sendingDataLock.lock();
 	auto totalSendDataSize = sendingData.size();
-	if(totalSendDataSize <= 0){
+	//if(id == 1)
+	//	std::cout << "totalSendDataSize: " << totalSendDataSize << "\n";
+	if(totalSendDataSize == 0){
 		sendingDataLock.unlock();
+		exOver->Recycle(threadIdx);
 		return;
 	}
 	exOver->packetBuf.resize(totalSendDataSize);
 	memcpy(&exOver->packetBuf[0], &sendingData[0], totalSendDataSize);
 	sendingData.clear();
+	sendingDataSize = 0;
 	sendingDataLock.unlock();
 	
 	//exOver->callback = [=](int size){ if(size != totalSendDataSize){
@@ -176,9 +166,9 @@ void BufOverManager::SendAddedData(int threadIdx) {
 	exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(&exOver->packetBuf[0]);
 	exOver->wsabuf[0].len = totalSendDataSize;
 
-	std::vector<unsigned char> debugPacket;
-	debugPacket.resize(totalSendDataSize);
-	memcpy(&debugPacket[0], &exOver->packetBuf[0], totalSendDataSize);
+	//std::vector<unsigned char> debugPacket;
+	//debugPacket.resize(totalSendDataSize);
+	//memcpy(&debugPacket[0], &exOver->packetBuf[0], totalSendDataSize);
 	
 	int ret;
 	{
@@ -191,11 +181,10 @@ void BufOverManager::SendAddedData(int threadIdx) {
 		if (WSA_IO_PENDING != err) {
 			PrintSocketError("WSASend : ", WSAGetLastError());
 			player->Disconnect(threadIdx);
-			return;
 		}
 	}
 
-	lastSendTime = std::chrono::system_clock::now();
+	//lastSendTime = std::chrono::system_clock::now();
 
 	//auto debugPacketPtr = &debugPacket[0];
 	//for (unsigned char recvPacketSize = debugPacket[0];

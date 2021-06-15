@@ -38,6 +38,8 @@ public:
 	void AddToViewSet(int otherId, int threadIdx) override;
 
 	void RemoveFromViewSet(int otherId, int threadIdx) override;
+	
+	void RemoveFromViewSetWithoutLock(int otherId, int threadIdx);
 
 	void SendLoginOk(int threadIdx);
 

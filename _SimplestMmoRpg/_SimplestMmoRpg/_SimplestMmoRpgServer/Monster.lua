@@ -98,28 +98,28 @@ function Tick(threadIdx)
 				targetActorX = LuaGetX(nearestPlayer)
 				targetActorY = LuaGetY(nearestPlayer)
 				mTargetActorId = nearestPlayer
-			elseif(targetActorX == -1 or targetActorY == -1) then
+			else
 				--어그로 안끌릴때 행동
 				if(ESoloMove_Roaming == mSoloMove) then
 					LuaRandomMove(mId, threadIdx)
 				end
-				return
 			end
 		end
 	end
 	
 	-- 플레이어에게 다가가는 행동
 	if(mCanFindWay == true) then -- 길찾기 가능
-		if(mTargetActorId ~= -1 and mIsFindWayStart == false) then
-			LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
-			mIsFindWayStart = true
-			LuaPrint("LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
-		end
-		if(mX == targetActorX and mY == targetActorY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
-			targetActorX = LuaGetX(mTargetActorId)
-			targetActorY = LuaGetY(mTargetActorId)
-			LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
-			LuaPrint("mX == targetActorX and mY == targetActorY LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
+		if(mTargetActorId ~= -1) then
+			if(mIsFindWayStart == false) then
+				LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+				mIsFindWayStart = true
+				--LuaPrint("LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
+			elseif(mX == targetActorX and mY == targetActorY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
+				targetActorX = LuaGetX(mTargetActorId)
+				targetActorY = LuaGetY(mTargetActorId)
+				LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+				--LuaPrint("mX == targetActorX and mY == targetActorY LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
+			end
 		end
 	elseif(mTargetActorId ~= -1) then
 		-- 길 못 찾는 몬스터

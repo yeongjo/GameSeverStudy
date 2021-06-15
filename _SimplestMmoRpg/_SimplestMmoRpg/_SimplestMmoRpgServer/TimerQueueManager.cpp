@@ -7,8 +7,6 @@
 HANDLE TimerQueueManager::hIocp;
 std::array<TimerQueue, TIMER_QUEUE_COUNT> TimerQueueManager::timerQueues;
 std::array<std::chrono::time_point<std::chrono::system_clock>, TIMER_QUEUE_COUNT> TimerQueueManager::startTime;
-std::unordered_map<int, std::chrono::time_point<std::chrono::system_clock>> TimerQueueManager::ignoreTime;
-std::mutex TimerQueueManager::ignoreTimeLock;
 
 void TimerQueue::remove_all(const int playerId) {
 	auto size = this->c.size();
@@ -38,8 +36,11 @@ void TimerQueueManager::Add(TimerEvent& event, int threadIdx) {
 }
 
 void TimerQueueManager::RemoveAll(int playerId) {
-	std::lock_guard<std::mutex> lock(ignoreTimeLock);
-	ignoreTime[playerId] = std::chrono::system_clock::now();
+	for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
+		auto& timerQueue = timerQueues[i];
+		std::lock_guard<std::mutex> lock(timerQueue.timerLock);
+		timerQueue.remove_all(playerId);
+	}
 }
 
 void TimerQueueManager::Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback) {
@@ -69,19 +70,15 @@ void TimerQueueManager::Do() {
 			auto now = system_clock::now();
 			if(startTime[i] < now){
 				auto& timerQueue = timerQueues[i];
-				ignoreTimeLock.lock();
 				timerQueue.timerLock.lock();
-				if (timerQueue.empty() || now < timerQueue.top().startTime ||
-					timerQueue.top().startTime < ignoreTime[timerQueue.top().object]) {
+				if (timerQueue.empty() || now < timerQueue.top().startTime) {
 					timerQueue.timerLock.unlock();
-					ignoreTimeLock.unlock();
 					continue;
 				}
-				ignoreTimeLock.unlock();
 				TimerEvent ev = timerQueue.top();
 				timerQueue.pop();
 				timerQueue.timerLock.unlock();
-				auto actor = Actor::Get(ev.object);
+				const auto actor = Actor::Get(ev.object);
 				if (!actor->isActive ||
 					(ev.checkCondition != nullptr && !ev.checkCondition())) {
 					continue;

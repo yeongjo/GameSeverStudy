@@ -60,18 +60,15 @@ void Actor::Die(int threadIdx) {
 }
 
 void Actor::RemoveFromAll(int threadIdx) {
+	RemoveFromSector();
+	TimerQueueManager::RemoveAll(id);
 	viewSetLock.lock();
 	for (auto viewId : viewSet) {
-		auto actor = Get(viewId);
-		if (!actor->IsNpc()) {
-			Player::Get(viewId)->SendRemoveActor(id, threadIdx);
-		}
-		actor->RemoveFromViewSet(id, threadIdx);
+		auto actor = Actor::Get(viewId);
+		actor->RemoveFromViewSet(id, threadIdx); // 다른 액터라 락 신경안써도됨
 	}
 	viewSet.clear();
 	viewSetLock.unlock();
-	RemoveFromSector();
-	TimerQueueManager::RemoveAll(id);
 }
 
 void Actor::SendStatChange(int threadIdx) {

@@ -14,7 +14,8 @@ protected:
 	lua_State* L; // Npc만 사용
 	std::mutex luaLock; // Npc만 사용
 	bool isDead = false;
-
+	std::chrono::time_point<std::chrono::system_clock> prevLoopTime;
+	
 	NonPlayer(int id) : Actor(id) {
 	}
 

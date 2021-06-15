@@ -219,9 +219,14 @@ void NonPlayer::SendStatChange(int threadIdx) {
 }
 
 void NonPlayer::AddNpcLoopEvent(int threadIdx) {
+	using namespace std::chrono;
 	TimerQueueManager::Add(id, 1000, threadIdx, nullptr, [&](int, int threadIdx2) {
-		AddNpcLoopEvent(threadIdx2);
-		Actor::Get(id)->Update(threadIdx2);
+		auto now = system_clock::now();
+		if(prevLoopTime + 1000ms <= now){
+			prevLoopTime = now;
+			AddNpcLoopEvent(threadIdx2);
+			Update(threadIdx2);
+		}
 	});
 }
 
@@ -323,19 +328,22 @@ void NonPlayer::WakeUpNpc(int threadIdx) {
 	if(isDead){
 		return;
 	}
+	using namespace std::chrono;
 	if (isActive == false){
 		bool old_state = false;
 		if (true == std::atomic_compare_exchange_strong(&isActive, &old_state, true)){
 			//std::cout << "wake up id: " << id << " is active: " << isActive << std::endl;
+			prevLoopTime = system_clock::now();
 			AddNpcLoopEvent(threadIdx);
 		}
 	}
 }
 
 void NonPlayer::SleepNpc() {
+	using namespace std::chrono;
 	//std::cout << "SleepNpc id: " << id << " is active: " << isActive << std::endl;
 	isActive = false;
-	TimerQueueManager::RemoveAll(id);
+	prevLoopTime = system_clock::now() + 2000ms;
 }
 
 void NonPlayer::LuaLock() {

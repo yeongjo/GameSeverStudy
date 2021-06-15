@@ -50,14 +50,8 @@ void Player::Disconnect(int threadIdx) {
 	}
 	session.state = PLST_FREE;
 	closesocket(session.socket);
-
-	{
-		std::lock_guard<std::mutex> lock(session.recvedBufLock);
-		session.recvedBuf.clear();
-	}
 	session.bufOverManager.ClearSendingData();
 	RemoveFromAll(threadIdx);
-	session.bufOverManager.SendAddedData(threadIdx);
 }
 
 void Player::Attack(int threadIdx) {
@@ -98,14 +92,15 @@ void Player::AddToViewSet(int otherId, int threadIdx) {
 }
 
 void Player::RemoveFromViewSet(int otherId, int threadIdx) {
-	viewSetLock.lock();
-	if (0 != viewSet.count(otherId)){
+	std::lock_guard<std::mutex> lock(viewSetLock);
+	RemoveFromViewSetWithoutLock(otherId, threadIdx);
+}
+
+void Player::RemoveFromViewSetWithoutLock(int otherId, int threadIdx) {
+	if (0 != viewSet.count(otherId)) {
 		viewSet.erase(otherId);
-		viewSetLock.unlock();
 		SendRemoveActor(otherId, threadIdx);
-		return;
 	}
-	viewSetLock.unlock();
 }
 
 void Player::SendLoginOk(int threadIdx) {
@@ -227,7 +222,7 @@ void Player::SetPos(int x, int y, int threadIdx) {
 
 	Sector::Move(id, prevX, prevY, x, y);
 
-	std::lock_guard<std::mutex> lock(oldNewViewListLock);
+	//std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	auto&& new_vl = Sector::GetIdFromOverlappedSector(id);
 
 	CopyViewSetToOldViewList();
@@ -260,7 +255,7 @@ void Player::SetPos(int x, int y, int threadIdx) {
 	for (auto otherId : oldViewList) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), otherId)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			RemoveFromViewSet(otherId, threadIdx);
+			RemoveFromViewSetWithoutLock(otherId, threadIdx);
 			Actor::Get(otherId)->RemoveFromViewSet(id, threadIdx);
 		}
 	}

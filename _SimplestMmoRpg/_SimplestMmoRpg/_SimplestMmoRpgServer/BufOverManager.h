@@ -25,7 +25,7 @@ private:
 	std::mutex remainBufLock;
 	Session* session;
 	Player* player;
-	int remainBufSize;
+	int sendingDataSize = 0;
 	int id;
 	int globalRecycleRemainCount = GLOBAL_RECYCLE_REMAIN_COUNT;
 	std::chrono::system_clock::time_point lastSendTime;

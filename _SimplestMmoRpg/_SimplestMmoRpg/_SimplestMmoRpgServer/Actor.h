@@ -60,12 +60,16 @@ public:
 
 	virtual void AddToViewSet(int otherId, int threadIdx);
 
-	virtual void RemoveFromViewSet(int otherId, int threadIdx); // TODO 나중에 RemoveAll 만들어야 lock으로 생긴 느려지는거 줄어듬
+	virtual void RemoveFromViewSet(int otherId, int threadIdx);
 
 	virtual void Die(int threadIdx);
 
 	virtual void RemoveFromAll(int threadIdx);
 
+	/// <summary>
+	/// 어떤 스레드에서 호출할지 아무도 모름
+	/// </summary>
+	/// <param name="threadIdx"></param>
 	virtual void SendStatChange(int threadIdx);
 
 	/// <summary>
