@@ -68,4 +68,6 @@ private:
 	void RecycleSendingDataQueue(std::vector<unsigned char>* recycleQueue);
 
 	void AddSendTimer();
+
+	void DebugProcessPacket(unsigned char* packet);
 };

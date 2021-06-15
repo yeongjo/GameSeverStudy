@@ -175,7 +175,10 @@ MiniOver* Player::GetOver() {
 Player::Player(int id) : Actor(id), session(this) {
 	actors[id] = this;
 	session.state = PLST_FREE;
-	session.recvOver.packetBuf.resize(MAX_BUFFER);
+	session.recvOver.packetBuf.resize(RECV_MAX_BUFFER);
+	session.recvOver.wsabuf[0].buf =
+		reinterpret_cast<char*>(&session.recvOver.packetBuf[0]);
+	session.recvOver.wsabuf[0].len = RECV_MAX_BUFFER;
 	session.recvOver.callback = [this](int bufSize) {
 		auto exOver = session.recvOver;
 		unsigned char* recvPacketPtr;
@@ -361,7 +364,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 	}
 	default: {
 		std::cout << "Unknown Packet Type from Client[" << id;
-		std::cout << "] Packet Type [" << +buf[1] << "]";
+		std::cout << "] Packet Type [" << +buf[1] << "]\n";
 		while (true);
 	}
 	}
@@ -389,9 +392,6 @@ void Player::SendRemoveActor(int removeTargetId) {
 
 void Player::CallRecv() {
 	auto& recvOver = session.recvOver;
-	recvOver.wsabuf[0].buf =
-		reinterpret_cast<char*>(&recvOver.packetBuf[0]);
-	recvOver.wsabuf[0].len = MAX_BUFFER;
 	memset(&recvOver.over, 0, sizeof(recvOver.over));
 	DWORD r_flag = 0;
 	int ret = WSARecv(session.socket, recvOver.wsabuf, 1, NULL, &r_flag, &recvOver.over, NULL);

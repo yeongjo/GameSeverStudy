@@ -29,7 +29,7 @@ public:
 	BufOver(BufOverManager* manager) :  manager(manager) {
 	}
 	void InitOver() {
-		packetBuf.resize(MAX_BUFFER);
+		packetBuf.resize(SEND_MAX_BUFFER);
 		memset(&over, 0, sizeof(over));
 	}
 

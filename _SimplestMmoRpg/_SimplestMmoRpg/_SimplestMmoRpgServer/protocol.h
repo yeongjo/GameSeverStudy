@@ -3,7 +3,7 @@
 constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
-#define QUICKTEST
+//#define QUICKTEST
 #ifndef QUICKTEST
 constexpr int MAX_USER = 210000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
 constexpr int NPC_ID_START = 10000;		// NPC의 ID가 시작하는 지점, 따라서 플레이어는 0부터 NPC_ID_START까지의 ID를 가짐
@@ -147,7 +147,8 @@ typedef  cs_packet_move c2s_move;
 typedef  cs_packet_login c2s_login;
 
 
-constexpr int MAX_BUFFER= 1024;
+constexpr int RECV_MAX_BUFFER= 1024;
+constexpr int SEND_MAX_BUFFER= 512+256;
 constexpr int MAX_PLAYER=(NPC_ID_START);
 constexpr int MAX_NONACTOR=(MAX_USER - NPC_ID_START);
 constexpr int MONSTER_ID_START = (MAX_NONACTOR/2+NPC_ID_START);

@@ -167,13 +167,15 @@ void ProcessPacket(int ci, unsigned char packet[])
 	}
 	case S2C_CHAT:
 	case S2C_ADD_PLAYER:
+	case SC_LOGIN_FAIL:
+	case SC_STAT_CHANGE:
 	case S2C_REMOVE_PLAYER: break;
 	default:{
 		wstringstream errorMsg;
 		errorMsg << L"Unknown Packet Type ";
 		errorMsg << static_cast<unsigned>(packet[1]);
+		wcout << errorMsg.str() << endl;
 		MessageBox(hWnd, errorMsg.str().c_str(), L"ERROR", 0);
-		//cout << "Unknown Packet Type " << +packet[1] << endl;
 	}
 	}
 }
