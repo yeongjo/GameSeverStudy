@@ -139,10 +139,43 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Actor.cpp" />
+    <ClCompile Include="BufOverManager.cpp" />
+    <ClCompile Include="Db.cpp" />
+    <ClCompile Include="Image.cpp" />
+    <ClCompile Include="Monster.cpp" />
+    <ClCompile Include="NonPlayer.cpp" />
+    <ClCompile Include="Npc.cpp" />
+    <ClCompile Include="OverlappedStruct.cpp" />
+    <ClCompile Include="PathFindHelper.cpp" />
+    <ClCompile Include="Player.cpp" />
+    <ClCompile Include="Sector.cpp" />
+    <ClCompile Include="TimerQueueManager.cpp" />
+    <ClCompile Include="WorldManager.cpp" />
     <ClCompile Include="_SimplestMmoRpgServer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Actor.h" />
+    <ClInclude Include="BufOverManager.h" />
+    <ClInclude Include="ConstexprMath.h" />
+    <ClInclude Include="Db.h" />
+    <ClInclude Include="Image.h" />
+    <ClInclude Include="LuaUtil.h" />
+    <ClInclude Include="Math.h" />
+    <ClInclude Include="Monster.h" />
+    <ClInclude Include="NonPlayer.h" />
+    <ClInclude Include="Npc.h" />
+    <ClInclude Include="OverlappedStruct.h" />
+    <ClInclude Include="PathFindHelper.h" />
+    <ClInclude Include="Player.h" />
     <ClInclude Include="protocol.h" />
+    <ClInclude Include="removable_priority_queue.h" />
+    <ClInclude Include="Sector.h" />
+    <ClInclude Include="Session.h" />
+    <ClInclude Include="SocketUtil.h" />
+    <ClInclude Include="StrcutPool.h" />
+    <ClInclude Include="TimerQueueManager.h" />
+    <ClInclude Include="WorldManager.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Monster.lua" />
