@@ -27,28 +27,29 @@ int LuaTakeDamage(lua_State* L) {
 }
 
 int LuaGetX(lua_State* L) {
-	int obj_id = lua_tointeger(L, -1);
+	int id = lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int x = Actor::Get(obj_id)->GetX();
+	int x = Actor::Get(id)->GetX();
 	lua_pushinteger(L, x);
 	return 1;
 }
 int LuaGetY(lua_State* L) {
-	int obj_id = lua_tointeger(L, -1);
+	int id = lua_tointeger(L, -1);
 	lua_pop(L, 2);
-	int y = Actor::Get(obj_id)->GetY();
+	int y = Actor::Get(id)->GetY();
 	lua_pushinteger(L, y);
 	return 1;
 }
 
 int LuaSetPos(lua_State* L) {
-	int obj_id = lua_tointeger(L, -3);
+	int id = lua_tointeger(L, -3);
 	int x = lua_tointeger(L, -2);
 	int y = lua_tointeger(L, -1);
 	lua_pop(L, 3);
-	Actor::Get(obj_id)->LuaUnLock();
-	Actor::Get(obj_id)->SetPos(x, y);
-	Actor::Get(obj_id)->LuaLock();
+	auto actor = Actor::Get(id);
+	actor->LuaUnLock();
+	actor->SetPos(x, y);
+	actor->LuaLock();
 	return 1;
 }
 
@@ -129,6 +130,7 @@ void NonPlayer::Init() {
 
 void NonPlayer::OnNearActorWithPlayerMove(int actorId) {
 	std::lock_guard<std::mutex> lock(luaLock);
+	SetLuaPosWithoutLock();
 	lua_getglobal(L, "OnNearActorWithPlayerMove");
 	lua_pushnumber(L, actorId);
 	CallLuaFunction(L, 1, 0);
@@ -138,7 +140,7 @@ bool NonPlayer::TakeDamage(int attackerId) {
 	std::lock_guard<std::mutex> lock(luaLock);
 	lua_getglobal(L, "TakeDamage");
 	lua_pushinteger(L, attackerId);
-	lua_pushinteger(L, Get(attackerId)->GetDamage());
+	lua_pushinteger(L, Actor::Get(attackerId)->GetDamage());
 	CallLuaFunction(L, 2, 1);
 	auto result = lua_toboolean(L, -1);
 	lua_pop(L, 1);
@@ -156,6 +158,21 @@ int NonPlayer::GetDamage() {
 	int value = lua_tonumber(L, -1);
 	lua_pop(L, 1);
 	return value;
+}
+
+int NonPlayer::GetNearestPlayer() {
+	std::lock_guard<std::mutex> lock(viewSetLock);
+	int nearestId = -1;
+	int minDistance = VIEW_RADIUS + 1000;
+	for(auto viewId : viewSet){
+		auto actor = Actor::Get(viewId);
+		auto actorDistance = Distance(x, y, actor->GetX(), actor->GetY());
+		if(actorDistance < minDistance){
+			minDistance = actorDistance;
+			nearestId = viewId;
+		}
+	}
+	return nearestId;
 }
 
 void NonPlayer::SetExp(int exp) {
@@ -181,7 +198,7 @@ void NonPlayer::SendStatChange() {
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet){
 			_ASSERT(viewId != id);
-			if (Get(viewId)->IsNpc()){
+			if (Actor::Get(viewId)->IsNpc()){
 				continue;
 			}
 			Player::Get(viewId)->SendChangedStat(id, GetHpWithoutLock(), GetLevelWithoutLock(), GetExpWithoutLock());
@@ -194,18 +211,16 @@ void NonPlayer::SendStatChange() {
 	}
 }
 
-void NonPlayer::OnNearActorWithSelfMove(int actorId) {
-	std::lock_guard<std::mutex> lock(luaLock);
-	lua_getglobal(L, "OnNearActorWithSelfMove");
-	lua_pushnumber(L, actorId);
-	CallLuaFunction(L, 1, 0);
-}
-
 void NonPlayer::AddNpcLoopEvent() {
 	TimerQueueManager::Add(id, 1000, nullptr, [&](int) {
 		AddNpcLoopEvent();
-		Get(id)->Update();
+		Actor::Get(id)->Update();
 	});
+}
+
+NonPlayer* NonPlayer::Get(int idx) {
+	_ASSERT(NPC_ID_START<= idx && idx <= MONSTER_ID_END);
+	return static_cast<NonPlayer*>(Actor::Get(idx));
 }
 
 void NonPlayer::InitLua(const char* path) {
@@ -240,6 +255,43 @@ void NonPlayer::InitLua(const char* path) {
 		Monster::Get(monsterId)->SetPathStartAndTarget(startX, startY, targetX, targetY);
 		return 1;
 		});
+	lua_register(L, "LuaMoveToConsiderWall", [](lua_State* L) {
+		auto id = lua_tointeger(L, -3);
+		auto targetX = lua_tointeger(L, -2);
+		auto targetY = lua_tointeger(L, -1);
+		lua_pop(L, 4);
+		auto actor = Actor::Get(id);
+		actor->LuaUnLock();
+		actor->MoveToConsiderWall(targetX, targetY);
+		actor->LuaLock();
+		return 1;
+	});
+	lua_register(L, "LuaRandomMove", [](lua_State* L) {
+		auto id = lua_tointeger(L, -1);
+		lua_pop(L, 2);
+		auto actor = Actor::Get(id);
+		actor->LuaUnLock();
+		actor->RandomMove();
+		actor->LuaLock();
+		return 1;
+	});
+	lua_register(L, "LuaGetNearPlayer", [](lua_State* L) {
+		auto id = lua_tointeger(L, -1);
+		lua_pop(L, 2);
+		auto actor = NonPlayer::Get(id);
+		lua_pushinteger(L, actor->GetNearestPlayer());
+		return 1;
+	});
+	lua_register(L, "LuaGetPos", [](lua_State* L) {
+		int id = lua_tointeger(L, -1);
+		lua_pop(L, 2);
+		int x = Actor::Get(id)->GetX();
+		int y = Actor::Get(id)->GetY();
+		lua_pushinteger(L, y);
+		lua_pushinteger(L, x);
+		return 1;
+	});
+
 
 	lua_getglobal(L, "SetId");
 	lua_pushinteger(L, id);
@@ -249,27 +301,30 @@ void NonPlayer::InitLua(const char* path) {
 
 void NonPlayer::AddToViewSet(int otherId) {
 	Actor::AddToViewSet(otherId);
-	OnNearActorWithSelfMove(otherId);
 	WakeUpNpc();
 }
 
 void NonPlayer::Die() {
+	isDead = true;
 	Actor::Die();
 	SleepNpc();
 }
 
 void NonPlayer::WakeUpNpc() {
-	auto actor = Get(id);
-	if (actor->IsActive() == false){
+	if(isDead){
+		return;
+	}
+	if (isActive == false){
 		bool old_state = false;
-		if (true == atomic_compare_exchange_strong(&actor->IsActive(), &old_state, true)){
-			//std::cout << "wake up id: " << id << " is active: " << actor->IsActive() << std::endl;
+		if (true == std::atomic_compare_exchange_strong(&isActive, &old_state, true)){
+			//std::cout << "wake up id: " << id << " is active: " << isActive << std::endl;
 			AddNpcLoopEvent();
 		}
 	}
 }
 
 void NonPlayer::SleepNpc() {
+	//std::cout << "SleepNpc id: " << id << " is active: " << isActive << std::endl;
 	isActive = false;
 	TimerQueueManager::RemoveAll(id);
 }
@@ -282,6 +337,18 @@ void NonPlayer::LuaUnLock() {
 	luaLock.unlock();
 }
 
+void NonPlayer::SetLuaPos() {
+	std::lock_guard<std::mutex> lockLua(luaLock);
+	SetLuaPosWithoutLock();
+}
+
+void NonPlayer::SetLuaPosWithoutLock() const {
+	lua_pushinteger(L, this->x);
+	lua_setglobal(L, "mX");
+	lua_pushinteger(L, this->y);
+	lua_setglobal(L, "mY");
+}
+
 void NonPlayer::SetPos(int x, int y) {
 	if (this->x == x && this->y == y) {
 		return;
@@ -290,16 +357,11 @@ void NonPlayer::SetPos(int x, int y) {
 	auto prevY = this->y;
 	this->x = x;
 	this->y = y;
-	{
-		std::lock_guard<std::mutex> lockLua(luaLock);
-		lua_pushinteger(L, this->x);
-		lua_setglobal(L, "mX");
-		lua_pushinteger(L, this->y);
-		lua_setglobal(L, "mY");
-	}
+	SetLuaPos();
 
 	Sector::Move(id, prevX, prevY, x, y);
 
+	std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	newViewList = Sector::GetIdFromOverlappedSector(id);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{ coutMutex };
@@ -314,7 +376,6 @@ void NonPlayer::SetPos(int x, int y) {
 	cout << "]한테 보임";
 #endif // NPCLOG
 
-	std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	CopyViewSetToOldViewList();
 	if (newViewList.empty()) {
 		SleepNpc(); // 아무도 보이지 않으므로 취침
@@ -322,7 +383,7 @@ void NonPlayer::SetPos(int x, int y) {
 		cout << " & 아무에게도 안보여서 취침" << endl;
 #endif
 		for (auto otherId : oldViewList) {
-			Get(otherId)->RemoveFromViewSet(id);
+			Actor::Get(otherId)->RemoveFromViewSet(id);
 		}
 		return;
 	}
@@ -339,14 +400,13 @@ void NonPlayer::SetPos(int x, int y) {
 #ifdef NPCLOG
 			cout << " &[" << otherId << "]에게 위치 갱신";
 #endif
-			OnNearActorWithSelfMove(otherId);
 			Player::Get(otherId)->SendMove(id);
 		}
 	}
 	for (auto otherId : oldViewList) {
 		if (newViewList.end() == std::find(newViewList.begin(), newViewList.end(), otherId)) {
 			RemoveFromViewSet(otherId);
-			Get(otherId)->RemoveFromViewSet(id);
+			Actor::Get(otherId)->RemoveFromViewSet(id);
 #ifdef NPCLOG
 			cout << " &[" << otherId << "]에게서 사라짐";
 #endif

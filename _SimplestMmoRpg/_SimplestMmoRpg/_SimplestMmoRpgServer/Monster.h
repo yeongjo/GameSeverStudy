@@ -23,18 +23,13 @@ public:
 
 	void Update() override;
 
-	/// <summary>
-	/// 해당 방향으로 한 칸 이동합니다.
-	/// </summary>
-	/// <param name="direcX"></param>
-	/// <param name="direcY"></param>
-	void MoveTo(int targetX, int targetY);
-
 	void SetDamage(int damage);
 
 	void Die() override {
 		NonPlayer::Die();
 	}
+private:
+	void SetCanFindWay(bool canFindWay);
 };
 
 

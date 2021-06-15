@@ -47,17 +47,18 @@
 #include <WS2tcpip.h>
 #include <MSWSock.h>
 
-#include "Db.h"
-#include "LuaUtil.h"
 //#define PLAYERLOG
 //#define NPCLOG
 //#define PLAYER_NOT_RANDOM_SPAWN
+//#define DISPLAYLOG
+//#define DBLOG
+#include "Db.h"
+#include "LuaUtil.h"
 #include "Npc.h"
 #include "PathFindHelper.h"
 #include "Player.h"
 #include "protocol.h"
 #include "Session.h"
-#define DISPLAYLOG
 #include "SocketUtil.h"
 #include "TimerQueueManager.h"
 #include "WorldManager.h"
@@ -156,15 +157,15 @@ int main() {
 	
 	WorldManager::Get()->Generate();
 	WorldManager::Get()->Load();
-	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
+	int i = SERVER_ID + 1;
+	for (; i <= PLAYER_ID_END; ++i) {
 		Player::Create(i);
 	}
-	for (int i = MAX_PLAYER + 1; i <= MAX_USER; i++) {
-		if(i < MONSTER_ID_START){
-			Npc::Create(i)->Init();
-		}else{
-			WorldManager::Get()->GetMonster(i);
-		}
+	for (; i <= NPC_ID_END; i++) {
+		Npc::Create(i)->Init();
+	}
+	for (; i <= MONSTER_ID_END; i++) {
+		WorldManager::Get()->GetMonster(i);
 	}
 
 	WSADATA WSAData;
@@ -204,7 +205,7 @@ int main() {
 
 	thread timer_thread(TimerQueueManager::Do);
 	vector <thread> worker_threads;
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < 4; ++i)
 		worker_threads.emplace_back(Worker, hIocp);
 	for (auto& th : worker_threads)
 		th.join();

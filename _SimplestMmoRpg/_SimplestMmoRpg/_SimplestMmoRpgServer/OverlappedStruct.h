@@ -18,26 +18,59 @@ struct AcceptOver : public MiniOver {
 	SOCKET			cSocket;					// OP_ACCEPT에서만 사용
 	WSABUF			wsabuf[1];
 };
-struct BufOver : public MiniOver {
+struct BufOverBase : public MiniOver {
+	WSABUF			wsabuf[1];
+private:
+	BufOverManager* manager;
+public:
+	BufOverBase() {
+		InitOver();
+	}
+	BufOverBase(BufOverManager* manager) : manager(manager) {
+		InitOver();
+	}
+	virtual void InitOver() {
+		memset(&over, 0, sizeof(over));
+	}
+
+	void Recycle() override {}
+
+	friend BufOverManager;
+private:
+	void SetManager(BufOverManager* manager) {
+		this->manager = manager;
+	}
+
+	BufOverManager* GetManager() {
+		return manager;
+	}
+};
+struct BufOver : public BufOverBase {
 	WSABUF			wsabuf[1];
 	std::vector<unsigned char>	packetBuf;
 private:
 	BufOverManager* manager;
 public:
-	BufOver() {
-	}
-	BufOver(BufOverManager* manager) :  manager(manager) {
-	}
+	BufOver() : BufOverBase(){ }
+	BufOver(BufOverManager* manager) : BufOverBase(manager) { }
 	void InitOver() {
+		BufOverBase::InitOver();
 		packetBuf.resize(SEND_MAX_BUFFER);
-		memset(&over, 0, sizeof(over));
 	}
 
 	void Recycle() override;
+
+	friend BufOverManager;
+private:
+	void SetManager(BufOverManager* manager) {
+		this->manager = manager;
+	}
+
 	BufOverManager* GetManager() {
 		return manager;
 	}
 };
-struct RecvOver : public BufOver {
+struct RecvOver : public BufOverBase {
+	unsigned char packetBuf[RECV_MAX_BUFFER];
 	void Recycle() override {}
 };

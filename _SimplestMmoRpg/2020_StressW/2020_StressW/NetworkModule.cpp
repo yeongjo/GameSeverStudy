@@ -25,7 +25,7 @@ extern HWND		hWnd;
 const static int MAX_TEST = MAX_PLAYER;
 const static int MAX_CLIENTS = MAX_TEST * 2;
 const static int INVALID_ID = -1;
-const static int MAX_PACKET_SIZE = MAX_BUFFER;
+const static int MAX_PACKET_SIZE = RECV_MAX_BUFFER;
 const static int MAX_BUFF_SIZE = 1024;
 
 #pragma comment (lib, "ws2_32.lib")

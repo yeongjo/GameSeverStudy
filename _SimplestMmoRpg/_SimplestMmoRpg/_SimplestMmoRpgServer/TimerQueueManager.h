@@ -34,9 +34,9 @@ constexpr bool TimerEvent::operator==(const TimerEvent& L) const {
 }
 
 class TimerQueue : public removable_priority_queue<TimerEvent> {
-	std::mutex timerLock;
 	std::atomic_int size;
 public:
+	std::mutex timerLock;
 	// TODO Add할때 id 리턴받고 그거 바탕으로 지워야할듯 근데 당장은 쓸일없음
 	//bool remove(const int playerId, const EEventType eventType) {
 	//	auto size = this->c.size();
@@ -52,12 +52,7 @@ public:
 	//	return false;
 	//}
 	void remove_all(const int playerId);
-	std::mutex& GetMutex() {
-		return timerLock;
-	}
-	bool empty() {
-		return size == 0;
-	}
+	
 	void push(const TimerEvent& event) {
 		++size;
 		removable_priority_queue<TimerEvent>::push(event);
@@ -72,7 +67,7 @@ public:
 	}
 };
 
-constexpr int TIMER_QUEUE_COUNT = 256;
+constexpr int TIMER_QUEUE_COUNT = 16;
 
 class TimerQueueManager {
 	/// <summary>

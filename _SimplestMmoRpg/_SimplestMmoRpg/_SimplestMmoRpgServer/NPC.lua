@@ -1,4 +1,6 @@
 mId =  -1
+mX = -1
+mY = -1
 function SetId(x)
 	mId = x
 	mInitX = LuaGetX(mId)
@@ -7,24 +9,13 @@ function SetId(x)
 	mY = mInitY
 end
 
-function OnNearActorWithPlayerMove(p_id)
-	p_x = LuaGetX(p_id)
-	p_y = LuaGetY(p_id)
-	mX = LuaGetX(mId)
-	mY = LuaGetY(mId)
-	--API_print(tostring(p_x)..", "..tostring(mX).."\n")
+function OnNearActorWithPlayerMove(playerId)
+	playerX = LuaGetX(playerId)
+	playerY = LuaGetY(playerId)
+	--API_print(tostring(playerX)..", "..tostring(mX).."\n")
 
-	if(p_x == mX) then
-		--API_print(tostring(p_y)..", "..tostring(mY).."\n")
-		if(p_y == mY) then
-			LuaSendMess(p_id, mId, "HELLO")
-			LuaAddEventNpcRandomMove(mId, 0000);
-			LuaAddEventNpcRandomMove(mId, 1000);
-			LuaAddEventNpcRandomMove(mId, 2000);
-			LuaAddEventSendMess(p_id, mId, "BYE", 2000);
-		end
+	if(playerX == mX and playerY == mY) then
+		LuaSendMess(playerId, mId, "HELLO")
+		LuaAddEventSendMess(playerId, mId, "BYE", 1000);
 	end
-end
-function OnNearActorWithSelfMove(p_id)
-	
 end

@@ -14,9 +14,7 @@ protected:
 	char name[MAX_NAME];
 	short	x, y, initX, initY;
 	int		moveTime;
-
-	std::atomic_bool isActive;
-
+	
 	/// <summary>
 	/// selectedSectorLock으로 잠궈주고 사용
 	/// </summary>
@@ -39,11 +37,13 @@ protected:
 	std::unordered_set<int> viewSet;
 	std::mutex   viewSetLock;
 	
-	static std::array <Actor*, MAX_USER + 1> actors;
+	static std::array <Actor*, MAX_USER> actors;
 
 	Actor(int id);
 
 public:
+	std::atomic_bool isActive;
+	
 	virtual void Init();
 
 	void InitSector() const;
@@ -58,8 +58,6 @@ public:
 
 	virtual void OnNearActorWithPlayerMove(int actorId) {}
 
-	virtual void OnNearActorWithSelfMove(int actorId) {}
-
 	virtual void AddToViewSet(int otherId);
 
 	virtual void RemoveFromViewSet(int otherId); // TODO 나중에 RemoveAll 만들어야 lock으로 생긴 느려지는거 줄어듬
@@ -69,6 +67,18 @@ public:
 	virtual void RemoveFromAll();
 
 	virtual void SendStatChange();
+
+	/// <summary>
+	/// 해당 방향으로 한 칸 이동합니다.
+	/// </summary>
+	void MoveTo(int targetX, int targetY);
+	
+	/// <summary>
+	/// 벽에 부딫히면 막히면서 해당 방향으로 한 칸 이동합니다.
+	/// </summary>
+	void MoveToConsiderWall(int targetX, int targetY);
+
+	void RandomMove();
 
 	virtual void SetPos(int x, int y) {
 		this->x = x;
@@ -109,7 +119,6 @@ public:
 	virtual int GetDamage();
 	std::vector<int>& GetSelectedSector();
 	virtual MiniOver* GetOver();
-	std::atomic_bool& IsActive();
 
 	static Actor* Get(int id);
 protected:

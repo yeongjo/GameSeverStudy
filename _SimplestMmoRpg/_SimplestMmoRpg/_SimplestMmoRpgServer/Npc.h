@@ -11,7 +11,7 @@ public:
 	}
 
 	static Npc* Get(int id) {
-		_ASSERT(NPC_ID_START <= id && id < NPC_ID_START+MAX_NPC);
+		_ASSERT(NPC_ID_START <= id && id <= NPC_ID_END);
 		return static_cast<Npc*>(actors[id]);
 	}
 

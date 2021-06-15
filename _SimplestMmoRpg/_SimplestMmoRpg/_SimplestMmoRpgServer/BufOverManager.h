@@ -1,6 +1,8 @@
 #pragma once
 #include <mutex>
 #include <vector>
+
+#include "StrcutPool.h"
 class Player;
 struct Session;
 struct BufOver;
@@ -13,12 +15,10 @@ struct BufOverManager;
 struct BufOverManager {
 #define INITAL_MANAGED_EXOVER_COUNT 2
 private:
-	std::vector<BufOver*> managedExOvers;
-	std::mutex managedExOversLock;
+	StructPool<BufOver> managedExOvers;
+	StructPool<std::vector<unsigned char>> sendingDataQueue;
 	std::vector<unsigned char> sendingData;
 	std::mutex sendingDataLock;
-	std::vector<std::vector<unsigned char>*> sendingDataQueue;
-	std::mutex sendingDataQueueLock;
 	Session* session;
 	Player* player;
 	int remainBufSize;

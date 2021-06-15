@@ -8,34 +8,37 @@ std::atomic_int TimerQueueManager::timerQueueIdx = 0;
 
 void TimerQueue::remove_all(const int playerId) {
 	auto size = this->c.size();
-	auto object = playerId;
+	const auto object = playerId;
 	for (size_t i = 0; i < size;){
 		if (this->c[i].object == object){
 			auto begin = this->c.begin();
 			this->c.erase(begin + i);
 			--size;
-			this->size = size;
 			continue;
 		}
 		++i;
 	}
+	this->size = size;
 }
 
 void TimerQueueManager::Add(TimerEvent& event) {
 	if(event.checkCondition == nullptr || !event.checkCondition()){
 		// 처음 이벤트 호출하는거라 checkCondition이 false면 넣는다
 		auto& timerQueue = timerQueues[timerQueueIdx];
-		std::lock_guard<std::mutex> lock(timerQueue.GetMutex());
-		timerQueue.push(event);
+		{
+			std::lock_guard<std::mutex> lock(timerQueue.timerLock);
+			timerQueue.push(event);
+		}
 		NextIndex();
 	}
 }
 
 void TimerQueueManager::RemoveAll(int playerId) {
-	auto& timerQueue = timerQueues[timerQueueIdx];
-	std::lock_guard<std::mutex> lock(timerQueue.GetMutex());
-	timerQueue.remove_all(playerId);
-	NextIndex();
+	for (size_t i = 0; i < TIMER_QUEUE_COUNT; ++i) {
+		auto& timerQueue = timerQueues[i];
+		std::lock_guard<std::mutex> lock(timerQueue.timerLock);
+		timerQueue.remove_all(playerId);
+	}
 }
 
 void TimerQueueManager::Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback) {
@@ -54,20 +57,16 @@ void TimerQueueManager::Do() {
 		auto now = system_clock::now();
 		for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
 			auto& timerQueue = timerQueues[i];
-			auto isEmpty = timerQueue.empty();
-			if(isEmpty){
+			TimerEvent ev;
+			timerQueue.timerLock.lock();
+			if (timerQueue.empty() || now < (ev = timerQueue.top()).startTime) {
+				timerQueue.timerLock.unlock();
 				continue;
 			}
-			timerQueue.GetMutex().lock();
-			if (now < timerQueue.top().startTime) {
-				timerQueue.GetMutex().unlock();
-				continue;
-			}
-			TimerEvent ev = timerQueue.top();
 			timerQueue.pop();
-			timerQueue.GetMutex().unlock();
+			timerQueue.timerLock.unlock();
 			auto actor = Actor::Get(ev.object);
-			if (!actor->IsActive() ||
+			if (!actor->isActive ||
 				(ev.checkCondition != nullptr && !ev.checkCondition())) {
 				continue;
 			}

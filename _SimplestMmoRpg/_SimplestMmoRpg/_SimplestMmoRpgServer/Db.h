@@ -1,9 +1,7 @@
 #pragma once
 #include <windows.h>
 #define UNICODE  
-#include <iosfwd>
 #include <sqlext.h>
-#include <sstream>
 
 #include "protocol.h"
 

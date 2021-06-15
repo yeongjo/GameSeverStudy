@@ -37,24 +37,26 @@ void WorldManager::Generate() {
 		monsters[i].exp = level * level * 2;
 		auto findPlayerAct = static_cast<EFindPlayerAct>(rand() % static_cast<int>(EFindPlayerAct::COUNT));
 		auto soloMove = static_cast<ESoloMove>(rand() % static_cast<int>(ESoloMove::COUNT));
+		monsters[i].canFindWay = rand() % 2;
 		monsters[i].findPlayerAct = findPlayerAct;
 		monsters[i].soloMove = soloMove;
-		if (findPlayerAct == EFindPlayerAct::Peace) {
-			if (soloMove == ESoloMove::Fixing) {
-				monsters[i].name = "Peace Orc";
-			} else if (soloMove == ESoloMove::Roaming) {
-				monsters[i].name = "Peace Roaming Orc";
-				monsters[i].exp *= 2;
-			}
-		} else if (findPlayerAct == EFindPlayerAct::Agro) {
-			monsters[i].exp *= 2;
-			if (soloMove == ESoloMove::Fixing) {
-				monsters[i].name = "Agro Orc";
-			} else if (soloMove == ESoloMove::Roaming) {
-				monsters[i].name = "Agro Roaming Orc";
-				monsters[i].exp *= 2;
-			}
+		std::stringstream ss;
+		if(monsters[i].canFindWay){
+			ss << "Way";
 		}
+		if(findPlayerAct == EFindPlayerAct::Agro){
+			ss << "Agro";
+			monsters[i].exp *= 2;
+		}else if (findPlayerAct == EFindPlayerAct::Peace) {
+		}
+		if (soloMove == ESoloMove::Fixing) {
+			ss << "Orc";
+		} else if (soloMove == ESoloMove::Roaming) {
+			ss << "Roam";
+			monsters[i].exp *= 2;
+		}
+		monsters[i].name = ss.str();
+		ss << ".lua";
 		monsters[i].script = "Monster.lua";
 	}
 }

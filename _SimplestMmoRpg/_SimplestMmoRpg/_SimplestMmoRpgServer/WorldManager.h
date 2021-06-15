@@ -15,6 +15,7 @@ public:
 		int x, y, hp, level, exp, damage;
 		std::string name;
 		std::string script;
+		bool canFindWay = false;
 		EFindPlayerAct findPlayerAct;
 		ESoloMove soloMove;
 	};

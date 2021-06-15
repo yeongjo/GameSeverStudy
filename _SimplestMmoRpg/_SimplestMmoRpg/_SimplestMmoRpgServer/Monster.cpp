@@ -12,7 +12,7 @@ Monster* Monster::Create(int id) {
 }
 
 Monster* Monster::Get(int id) {
-	_ASSERT(MONSTER_ID_START <= id && id < MONSTER_ID_START + MAX_MONSTER);
+	_ASSERT(MONSTER_ID_START <= id && id <= MONSTER_ID_END);
 	return reinterpret_cast<Monster*>(Actor::Get(id));
 }
 
@@ -34,6 +34,12 @@ void Monster::Init() {
 	Init(monster);
 }
 
+void Monster::SetCanFindWay(bool canFindWay) {
+	std::lock_guard<std::mutex> lock(luaLock);
+	lua_pushboolean(L, canFindWay);
+	lua_setglobal(L, "mCanFindWay");
+}
+
 void Monster::Init(WorldManager::FileMonster& monster) {
 	strcpy_s(this->name, monster.name.c_str());
 	this->x = monster.x;
@@ -44,6 +50,7 @@ void Monster::Init(WorldManager::FileMonster& monster) {
 	SetLevel(monster.level);
 	SetExp(monster.exp);
 	SetDamage(monster.damage);
+	SetCanFindWay(monster.canFindWay);
 
 	lua_pushnumber(L, static_cast<int>(monster.findPlayerAct));
 	lua_setglobal(L, "mFindPlayerAct");
@@ -63,18 +70,6 @@ inline void Monster::SetDamage(int damage) {
 	lua_setglobal(L, "mDamage");
 }
 
-inline void Monster::MoveTo(int targetX, int targetY) {
-	int tx = x, ty = y;
-	auto offX = targetX - tx;
-	auto offY = targetY - ty;
-	if (abs(offX) > abs(offY)) {
-		offX > 0 ? ++tx : offX < 0 ? --tx : tx;
-	} else {
-		offY > 0 ? ++ty : offY < 0 ? --ty : ty;
-	}
-	SetPos(tx, ty);
-}
-
 void Monster::Update() {
 	std::lock_guard<std::mutex> lock(monsterLock);
 	{
@@ -87,9 +82,8 @@ void Monster::Update() {
 				lua_pop(L, 1);
 				return;
 			}
-			asTable(L, viewSet.begin(), viewSet.end());
 		}
-		CallLuaFunction(L, 1, 0);
+		CallLuaFunction(L, 0, 0);
 	}
 
 	PathFindHelper::FindStatus findWay = PathFindHelper::FindStatus::CantFindWay;

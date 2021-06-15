@@ -11,12 +11,12 @@ Player* Player::Create(int id) {
 }
 
 Player* Player::Get(int id) {
-	_ASSERT(0 < id && id < NPC_ID_START);
+	_ASSERT(0 < id && id <= PLAYER_ID_END);
 	return reinterpret_cast<Player*>(Actor::Get(id));
 }
 
 int Player::GetNewId(SOCKET socket) {
-	for (int i = 1; i <= MAX_PLAYER; ++i){
+	for (int i = 1; i <= PLAYER_ID_END; ++i){
 		auto actor = Get(i);
 		auto session = actor->GetSession();
 		if (PLST_FREE == session->state){
@@ -45,7 +45,6 @@ void Player::Init() {
 }
 
 void Player::Disconnect() {
-	auto actor = Get(id);
 	if (session.state == PLST_FREE){
 		return;
 	}
@@ -57,7 +56,7 @@ void Player::Disconnect() {
 		session.recvedBuf.clear();
 	}
 	session.bufOverManager.ClearSendingData();
-	actor->RemoveFromAll();
+	RemoveFromAll();
 }
 
 void Player::Attack() {
@@ -175,7 +174,6 @@ MiniOver* Player::GetOver() {
 Player::Player(int id) : Actor(id), session(this) {
 	actors[id] = this;
 	session.state = PLST_FREE;
-	session.recvOver.packetBuf.resize(RECV_MAX_BUFFER);
 	session.recvOver.wsabuf[0].buf =
 		reinterpret_cast<char*>(&session.recvOver.packetBuf[0]);
 	session.recvOver.wsabuf[0].len = RECV_MAX_BUFFER;
@@ -231,9 +229,9 @@ void Player::SetPos(int x, int y) {
 
 	Sector::Move(id, prevX, prevY, x, y);
 
+	std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	auto&& new_vl = Sector::GetIdFromOverlappedSector(id);
 
-	std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	CopyViewSetToOldViewList();
 
 	for (auto otherId : new_vl) {
@@ -244,7 +242,7 @@ void Player::SetPos(int x, int y) {
 		} else {
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
 			if (!Actor::Get(otherId)->IsNpc()) {
-				Get(otherId)->SendMove(id);
+				Player::Get(otherId)->SendMove(id);
 			} else {
 #ifdef PLAYERLOG
 				{
@@ -252,7 +250,12 @@ void Player::SetPos(int x, int y) {
 					cout << "플레이어[" << id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 갱신" << endl;
 				}
 #endif
-				Actor::Get(otherId)->OnNearActorWithPlayerMove(id);
+				auto actor = Actor::Get(otherId);
+				auto tx = actor->GetX();
+				auto ty = actor->GetY();
+				if(x==tx&&y==ty){
+					actor->OnNearActorWithPlayerMove(id);
+				}
 			}
 		}
 	}
@@ -305,6 +308,13 @@ void Player::ProcessPacket(unsigned char* buf) {
 	switch (buf[1]) {
 	case CS_LOGIN: {
 		cs_packet_login* packet = reinterpret_cast<cs_packet_login*>(buf);
+		if(packet->player_id[0] == '\0'){
+			std::cout << "You need to type id not a black" << std::endl;
+			SendChat(id, "You need to type id not a black");
+			session.bufOverManager.SendAddedData();
+			Disconnect();
+			return;
+		}
 		session.state = PLST_INGAME;
 		{
 			// 위치 이름 초기화

@@ -7,20 +7,12 @@
 
 size_t BufOverManager::EX_OVER_SIZE_INCREMENT = 2;
 
-BufOverManager::BufOverManager(Player* player) : managedExOvers(INITAL_MANAGED_EXOVER_COUNT), session(player->GetSession()), player(player),
-                                                id(player->GetId()) {
-	auto size = INITAL_MANAGED_EXOVER_COUNT;
-	for (size_t i = 0; i < size; ++i){
-		managedExOvers[i] = new BufOver(this);
-		managedExOvers[i]->InitOver();
-	}
+BufOverManager::BufOverManager(Player* player) : session(player->GetSession()),
+                                                 player(player),
+                                                 id(player->GetId()) {
 }
 
 BufOverManager::~BufOverManager() {
-	for (auto queue : sendingDataQueue){
-		delete queue;
-	}
-	sendingDataQueue.clear();
 }
 
 bool BufOverManager::HasSendData() {
@@ -50,46 +42,34 @@ void BufOverManager::ClearSendingData() {
 }
 
 BufOver* BufOverManager::Get() {
-	BufOver* result;
-	managedExOversLock.lock();
-	size_t size = managedExOvers.size();
-	if (size == 0) {
-		managedExOversLock.unlock();
-		auto newOver = new BufOver(this);
-		newOver->InitOver();
-		return newOver;
-	}
-	result = managedExOvers[size - 1];
-	managedExOvers.pop_back(); // 팝안하는 방식으로 최적화 가능
-	managedExOversLock.unlock();
-	return result;
+	auto exover = managedExOvers.Get();
+	exover->SetManager(this);
+	return exover; // TODO WSAOVERLAPPED	over 초기화 잘되는지 확인하기
 }
 
 void BufOverManager::Recycle(BufOver* usableGroup) {
 	usableGroup->InitOver();
-	managedExOversLock.lock();
-	managedExOvers.push_back(usableGroup);
-	managedExOversLock.unlock();
+	managedExOvers.Recycle(usableGroup);
 }
 
-std::vector<unsigned char>* BufOverManager::GetSendingDataQueue() {
-	std::lock_guard<std::mutex> lock(sendingDataQueueLock); //TODO 앞뒤 리스트 방식으로 바꾸기
-	auto size = sendingDataQueue.size();
-	if (0 < size) {
-		const auto result = sendingDataQueue[size - 1];
-		sendingDataQueue.pop_back();
-		return result;
-	}
-	return new std::vector<unsigned char>();
-}
-
-void BufOverManager::RecycleSendingDataQueue(std::vector<unsigned char>* recycleQueue) {
-	std::lock_guard<std::mutex> lock(sendingDataQueueLock);
-	sendingDataQueue.push_back(recycleQueue);
-}
+//std::vector<unsigned char>* BufOverManager::GetSendingDataQueue() {
+//	std::lock_guard<std::mutex> lock(sendingDataQueueLock); //TODO 앞뒤 리스트 방식으로 바꾸기
+//	auto size = sendingDataQueue.size();
+//	if (0 < size) {
+//		const auto result = sendingDataQueue[size - 1];
+//		sendingDataQueue.pop_back();
+//		return result;
+//	}
+//	return new std::vector<unsigned char>();
+//}
+//
+//void BufOverManager::RecycleSendingDataQueue(std::vector<unsigned char>* recycleQueue) {
+//	std::lock_guard<std::mutex> lock(sendingDataQueueLock);
+//	sendingDataQueue.push_back(recycleQueue);
+//}
 
 void BufOverManager::AddSendTimer() {
-	TimerQueueManager::Add(id, 32, [&]() {
+	TimerQueueManager::Add(id, 12, [&]() {
 		                       return HasSendData();
 	                       }, [this](int size) {
 		                       SendAddedData();
@@ -143,10 +123,11 @@ void BufOverManager::SendAddedData() {
 	sendingData.clear();
 	sendingDataLock.unlock();
 	
-	exOver->callback = [=](int size){ if(size != totalSendDataSize){
-		std::cout << "뭐꼬" << std::endl;
-		_ASSERT(false);
-	}};
+	//exOver->callback = [=](int size){ if(size != totalSendDataSize){
+	//	std::cout << "뭐꼬" << std::endl;
+	//	_ASSERT(false);
+	//}};
+	exOver->callback = EmptyFunction;
 	exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(&exOver->packetBuf[0]);
 	exOver->wsabuf[0].len = totalSendDataSize;
 
@@ -169,14 +150,14 @@ void BufOverManager::SendAddedData() {
 		}
 	}
 
-	auto debugPacketPtr = &debugPacket[0];
-	for (unsigned char recvPacketSize = debugPacket[0];
-		0 < totalSendDataSize;
-		recvPacketSize = debugPacketPtr[0]) {
-		DebugProcessPacket(debugPacketPtr);
-		totalSendDataSize -= recvPacketSize;
-		debugPacketPtr += recvPacketSize;
-	}
+	//auto debugPacketPtr = &debugPacket[0];
+	//for (unsigned char recvPacketSize = debugPacket[0];
+	//	0 < totalSendDataSize;
+	//	recvPacketSize = debugPacketPtr[0]) {
+	//	DebugProcessPacket(debugPacketPtr);
+	//	totalSendDataSize -= recvPacketSize;
+	//	debugPacketPtr += recvPacketSize;
+	//}
 	
 	//auto& copiedSendingData = *GetSendingDataQueue();
 	//copiedSendingData.resize(totalSendDataSize);

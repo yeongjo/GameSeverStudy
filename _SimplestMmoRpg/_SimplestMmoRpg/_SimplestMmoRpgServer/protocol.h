@@ -3,17 +3,24 @@
 constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
-//#define QUICKTEST
-#ifndef QUICKTEST
-constexpr int MAX_USER = 210000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
+#define QUICKTEST
+//#define MEDIUMTEST
+#if defined(QUICKTEST)
+constexpr int MAX_USER = 7000;
+constexpr int NPC_ID_START = 5000;
+#define WORLD_WIDTH		2000
+#define WORLD_HEIGHT	2000
+#elif defined(MEDIUMTEST)
+constexpr int MAX_USER = 135000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
 constexpr int NPC_ID_START = 10000;		// NPC의 ID가 시작하는 지점, 따라서 플레이어는 0부터 NPC_ID_START까지의 ID를 가짐
 					// NPC의 개수는 MAX_USER - NPC_ID_START = 20000,  20만 마리의 NPC가 존재
 #define WORLD_WIDTH	2000
 #define WORLD_HEIGHT	2000
 #else
-constexpr int MAX_USER = 7000;
-constexpr int NPC_ID_START = 5000;
-#define WORLD_WIDTH		2000
+constexpr int MAX_USER = 210000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
+constexpr int NPC_ID_START = 10000;		// NPC의 ID가 시작하는 지점, 따라서 플레이어는 0부터 NPC_ID_START까지의 ID를 가짐
+					// NPC의 개수는 MAX_USER - NPC_ID_START = 20000,  20만 마리의 NPC가 존재
+#define WORLD_WIDTH	2000
 #define WORLD_HEIGHT	2000
 #endif
 
@@ -150,9 +157,12 @@ typedef  cs_packet_login c2s_login;
 constexpr int RECV_MAX_BUFFER= 1024;
 constexpr int SEND_MAX_BUFFER= 512+256;
 constexpr int MAX_PLAYER=(NPC_ID_START);
+constexpr int PLAYER_ID_END=NPC_ID_START-1;
 constexpr int MAX_NONACTOR=(MAX_USER - NPC_ID_START);
 constexpr int MONSTER_ID_START = (MAX_NONACTOR/2+NPC_ID_START);
-constexpr int MAX_MONSTER = (MAX_USER - MONSTER_ID_START) + 1;
+constexpr int NPC_ID_END = MONSTER_ID_START-1; // 이 번호가 마지막 인덱스임 id <= NPC_ID_END
+constexpr int MONSTER_ID_END = MAX_USER-1;
+constexpr int MAX_MONSTER = (MONSTER_ID_END - MONSTER_ID_START) + 1;
 constexpr int MAX_NPC = (MAX_NONACTOR - MAX_MONSTER);
 constexpr int MESSAGE_MAX_BUFFER= MAX_STR_LEN;
 constexpr int MAX_NAME= MAX_ID_LEN;

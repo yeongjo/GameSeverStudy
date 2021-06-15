@@ -6,7 +6,7 @@
 #include "TimerQueueManager.h"
 #include "WorldManager.h"
 
-std::array <Actor*, MAX_USER + 1> Actor::actors;
+std::array <Actor*, MAX_USER> Actor::actors;
 
 Actor::Actor(int id) {
 	this->id = id;
@@ -93,6 +93,36 @@ void Actor::SendStatChange() {
 	}
 }
 
+void Actor::MoveTo(int targetX, int targetY) {
+	int tx = x, ty = y;
+	auto offX = targetX - tx;
+	auto offY = targetY - ty;
+	if (abs(offX) > abs(offY)) {
+		offX > 0 ? ++tx : offX < 0 ? --tx : tx;
+	} else {
+		offY > 0 ? ++ty : offY < 0 ? --ty : ty;
+	}
+	SetPos(tx, ty);
+}
+
+void Actor::MoveToConsiderWall(int targetX, int targetY) {
+	int tx = x, ty = y;
+	auto offX = targetX - tx;
+	auto offY = targetY - ty;
+	if (abs(offX) > abs(offY)) {
+		offX > 0 ? ++tx : offX < 0 ? --tx : tx;
+	} else {
+		offY > 0 ? ++ty : offY < 0 ? --ty : ty;
+	}
+	if(IsMovableTile(tx, ty)){
+		SetPos(tx, ty);
+	}
+}
+
+void Actor::RandomMove() {
+	Move(static_cast<DIRECTION>(rand() % 4));
+}
+
 bool Actor::IsMovableTile(int x, int y) {
 	return !WorldManager::Get()->GetCollidable(x, y);
 }
@@ -117,11 +147,11 @@ void Actor::LuaUnLock() {
 }
 
 bool Actor::IsMonster() const {
-	return MONSTER_ID_START < id;
+	return MONSTER_ID_START <= id;
 }
 
 bool Actor::IsNpc() const {
-	return NPC_ID_START < id;
+	return NPC_ID_START <= id;
 }
 
 void Actor::SetExp(int exp) {
@@ -157,8 +187,6 @@ std::vector<int>& Actor::GetSelectedSector() {
 }
 
 MiniOver* Actor::GetOver() { return nullptr; }
-
-std::atomic_bool& Actor::IsActive() { return isActive; }
 
 Actor* Actor::Get(int id) {
 	return actors[id];

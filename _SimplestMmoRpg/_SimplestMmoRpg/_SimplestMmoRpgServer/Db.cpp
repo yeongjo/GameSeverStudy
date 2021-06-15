@@ -171,9 +171,11 @@ DB* DB::Get() {
 }
 
 void DB::ShowError() {
+#ifdef DBLOG
 	printf("DB Error: "); // Insert할때 이미 데이터가 있어도 애러로 나온다
 	HandleDiagnosticRecord(hdbc, SQL_HANDLE_DBC, retcode);
 	printf("\n");
+#endif
 }
 
 void DB::HandleDiagnosticRecord(SQLHANDLE hHandle, SQLSMALLINT hType, RETCODE RetCode) {
