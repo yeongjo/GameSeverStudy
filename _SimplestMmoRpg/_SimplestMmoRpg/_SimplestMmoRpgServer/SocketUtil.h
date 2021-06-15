@@ -1,6 +1,6 @@
 #pragma once
 #include <iostream>
-inline void PrintSocketError(const char* msg, int errNum) {
+void PrintSocketError(const char* msg, int errNum) {
 #ifdef DISPLAYLOG
 	WCHAR* lpMsgBuf;
 	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,

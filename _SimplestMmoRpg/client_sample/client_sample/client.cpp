@@ -219,7 +219,7 @@ public:
 	}
 };
 class Player : public OBJECT {
-	int hp, level, exp;
+	int hp, level, exp, id;
 	long long last_attack_time = 0;
 
 public:
@@ -232,6 +232,7 @@ public:
 	void SetHp(int hp) { this->hp = hp; }
 	void SetLevel(int level) { this->level = level; }
 	void SetExp(int exp) { this->exp = exp; }
+	void SetId(int id) { this->id = id; }
 };
 
 Player avatar;
@@ -301,6 +302,7 @@ void ProcessPacket(char* ptr) {
 		avatar.SetHp(packet->HP);
 		avatar.SetLevel(packet->LEVEL);
 		avatar.SetExp(packet->EXP);
+		avatar.SetId(packet->id);
 		//avatar.set_name(packet->name);
 		g_left_x = packet->x - SCREEN_WIDTH / 2;
 		g_top_y = packet->y - SCREEN_HEIGHT / 2;

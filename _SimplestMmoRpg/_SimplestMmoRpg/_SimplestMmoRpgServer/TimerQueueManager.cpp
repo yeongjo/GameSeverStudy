@@ -1,9 +1,14 @@
 #include "TimerQueueManager.h"
 
+#include <utility>
+
 #include "Actor.h"
 
 HANDLE TimerQueueManager::hIocp;
 std::array<TimerQueue, TIMER_QUEUE_COUNT> TimerQueueManager::timerQueues;
+std::array<std::chrono::time_point<std::chrono::system_clock>, TIMER_QUEUE_COUNT> TimerQueueManager::startTime;
+std::unordered_map<int, std::chrono::time_point<std::chrono::system_clock>> TimerQueueManager::ignoreTime;
+std::mutex TimerQueueManager::ignoreTimeLock;
 
 void TimerQueue::remove_all(const int playerId) {
 	auto size = this->c.size();
@@ -17,64 +22,79 @@ void TimerQueue::remove_all(const int playerId) {
 		}
 		++i;
 	}
-	this->size = size;
 }
 
-void TimerQueueManager::Add(TimerEvent& event) {
-	if(event.checkCondition == nullptr || !event.checkCondition()){
-		// 처음 이벤트 호출하는거라 checkCondition이 false면 넣는다
-		auto randIdx = rand() % TIMER_QUEUE_COUNT;
-		auto& timerQueue = timerQueues[randIdx];
-		{
-			std::lock_guard<std::mutex> lock(timerQueue.timerLock);
-			timerQueue.push(event);
-		}
+void TimerQueueManager::Add(TimerEvent& event, int threadIdx) {
+	// 처음 이벤트 호출하는거라 checkCondition이 false면 넣는다
+	auto& timerQueue = timerQueues[threadIdx];
+	timerQueue.timerLock.lock();
+	timerQueue.push(event);
+	startTime[threadIdx] = timerQueue.top().startTime;
+	timerQueue.timerLock.unlock();
+
+	if (!event.callback) {
+		_ASSERT(false);
 	}
 }
 
 void TimerQueueManager::RemoveAll(int playerId) {
-	for (size_t i = 0; i < TIMER_QUEUE_COUNT; ++i) {
-		auto& timerQueue = timerQueues[i];
-		std::lock_guard<std::mutex> lock(timerQueue.timerLock);
-		timerQueue.remove_all(playerId);
-	}
+	std::lock_guard<std::mutex> lock(ignoreTimeLock);
+	ignoreTime[playerId] = std::chrono::system_clock::now();
 }
 
-void TimerQueueManager::Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback) {
+void TimerQueueManager::Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback) {
 	using namespace std::chrono;
 	TimerEvent ev;
-	ev.checkCondition = checkCondition;
-	ev.callback = callback;
+	ev.checkCondition = std::move(checkCondition);
+	ev.callback = std::move(callback);
 	ev.object = obj;
+	ev.bufOver = Actor::Get(obj)->GetOver(threadIdx);
 	ev.startTime = system_clock::now() + milliseconds(delayMs);
-	Add(ev);
+	Add(ev, threadIdx);
+}
+
+void TimerQueueManager::Post(int obj, int threadIdx, iocpCallback callback) {
+	auto over = Actor::Get(obj)->GetOver(threadIdx);
+	if(!callback){
+		_ASSERT(false);
+	}
+	over->callback = callback;
+	PostQueuedCompletionStatus(hIocp, 1, obj, &over->over);
 }
 
 void TimerQueueManager::Do() {
 	using namespace std::chrono;
 	for (;;) {
-		auto now = system_clock::now();
 		for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
-			auto& timerQueue = timerQueues[i];
-			TimerEvent ev;
-			timerQueue.timerLock.lock();
-			if (timerQueue.empty() || now < (ev = timerQueue.top()).startTime) {
+			auto now = system_clock::now();
+			if(startTime[i] < now){
+				auto& timerQueue = timerQueues[i];
+				ignoreTimeLock.lock();
+				timerQueue.timerLock.lock();
+				if (timerQueue.empty() || now < timerQueue.top().startTime ||
+					timerQueue.top().startTime < ignoreTime[timerQueue.top().object]) {
+					timerQueue.timerLock.unlock();
+					ignoreTimeLock.unlock();
+					continue;
+				}
+				ignoreTimeLock.unlock();
+				TimerEvent ev = timerQueue.top();
+				timerQueue.pop();
 				timerQueue.timerLock.unlock();
-				continue;
-			}
-			timerQueue.pop();
-			timerQueue.timerLock.unlock();
-			auto actor = Actor::Get(ev.object);
-			if (!actor->isActive ||
-				(ev.checkCondition != nullptr && !ev.checkCondition())) {
-				continue;
-			}
+				auto actor = Actor::Get(ev.object);
+				if (!actor->isActive ||
+					(ev.checkCondition != nullptr && !ev.checkCondition())) {
+					continue;
+					}
 
-			auto over = actor->GetOver();
-			over->callback = ev.callback;
-			PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
+				auto over = ev.bufOver;
+				over->callback = ev.callback;
+				if (!ev.callback) {
+					_ASSERT(false);
+				}
+				PostQueuedCompletionStatus(hIocp, 1, ev.object, &over->over);
+			}
 		}
-		std::this_thread::sleep_for(10ms);
 	}
 }
 

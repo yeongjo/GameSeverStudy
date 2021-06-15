@@ -27,10 +27,10 @@ void Actor::RemoveFromSector() const {
 	Sector::GetSector(x, y)->Remove(id);
 }
 
-void Actor::Update() {
+void Actor::Update(int threadIdx) {
 }
 
-void Actor::Move(DIRECTION dir) {
+void Actor::Move(DIRECTION dir, int threadIdx) {
 	auto x = this->x;
 	auto y = this->y;
 	switch (dir){
@@ -44,29 +44,29 @@ void Actor::Move(DIRECTION dir) {
 		break;
 	}
 	if (IsMovableTile(x, y)){
-		SetPos(x, y);
+		SetPos(x, y, threadIdx);
 	}
 }
 
 
-void Actor::RemoveFromViewSet(int otherId) {
+void Actor::RemoveFromViewSet(int otherId, int threadIdx) {
 	viewSetLock.lock();
 	viewSet.erase(otherId);
 	viewSetLock.unlock();
 }
 
-void Actor::Die() {
-	RemoveFromAll();
+void Actor::Die(int threadIdx) {
+	RemoveFromAll(threadIdx);
 }
 
-void Actor::RemoveFromAll() {
+void Actor::RemoveFromAll(int threadIdx) {
 	viewSetLock.lock();
 	for (auto viewId : viewSet) {
 		auto actor = Get(viewId);
 		if (!actor->IsNpc()) {
-			Player::Get(viewId)->SendRemoveActor(id);
+			Player::Get(viewId)->SendRemoveActor(id, threadIdx);
 		}
-		actor->RemoveFromViewSet(id);
+		actor->RemoveFromViewSet(id, threadIdx);
 	}
 	viewSet.clear();
 	viewSetLock.unlock();
@@ -74,7 +74,7 @@ void Actor::RemoveFromAll() {
 	TimerQueueManager::RemoveAll(id);
 }
 
-void Actor::SendStatChange() {
+void Actor::SendStatChange(int threadIdx) {
 	{
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet) {
@@ -83,17 +83,17 @@ void Actor::SendStatChange() {
 			if (actor->IsNpc()) {
 				continue;
 			}
-			Player::Get(viewId)->SendChangedStat(id, GetHp(), GetLevel(), GetExp());
+			Player::Get(viewId)->SendChangedStat(id, GetHp(), GetLevel(), GetExp(), threadIdx);
 		}
 	}
 	if (GetHp() == 0) {
-		TimerQueueManager::Add(id, 1, nullptr, [this](int) {
-			Die();
+		TimerQueueManager::Post(id, threadIdx, [this](int, int threadIdx) {
+			Die(threadIdx);
 			});
 	}
 }
 
-void Actor::MoveTo(int targetX, int targetY) {
+void Actor::MoveTo(int targetX, int targetY, int threadIdx) {
 	int tx = x, ty = y;
 	auto offX = targetX - tx;
 	auto offY = targetY - ty;
@@ -102,10 +102,10 @@ void Actor::MoveTo(int targetX, int targetY) {
 	} else {
 		offY > 0 ? ++ty : offY < 0 ? --ty : ty;
 	}
-	SetPos(tx, ty);
+	SetPos(tx, ty, threadIdx);
 }
 
-void Actor::MoveToConsiderWall(int targetX, int targetY) {
+void Actor::MoveToConsiderWall(int targetX, int targetY, int threadIdx) {
 	int tx = x, ty = y;
 	auto offX = targetX - tx;
 	auto offY = targetY - ty;
@@ -115,12 +115,12 @@ void Actor::MoveToConsiderWall(int targetX, int targetY) {
 		offY > 0 ? ++ty : offY < 0 ? --ty : ty;
 	}
 	if(IsMovableTile(tx, ty)){
-		SetPos(tx, ty);
+		SetPos(tx, ty, threadIdx);
 	}
 }
 
-void Actor::RandomMove() {
-	Move(static_cast<DIRECTION>(rand() % 4));
+void Actor::RandomMove(int threadIdx) {
+	Move(static_cast<DIRECTION>(rand() % 4), threadIdx);
 }
 
 bool Actor::IsMovableTile(int x, int y) {
@@ -154,7 +154,7 @@ bool Actor::IsNpc() const {
 	return NPC_ID_START <= id;
 }
 
-void Actor::SetExp(int exp) {
+void Actor::SetExp(int exp, int threadIdx) {
 }
 
 void Actor::SetLevel(int level) {
@@ -186,7 +186,7 @@ std::vector<int>& Actor::GetSelectedSector() {
 	return result;
 }
 
-MiniOver* Actor::GetOver() { return nullptr; }
+MiniOver* Actor::GetOver(int threadIdx) { return nullptr; }
 
 Actor* Actor::Get(int id) {
 	return actors[id];

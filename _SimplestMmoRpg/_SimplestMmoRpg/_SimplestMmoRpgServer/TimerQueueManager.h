@@ -2,6 +2,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <unordered_map>
 
 #include "removable_priority_queue.h"
 #include "OverlappedStruct.h"
@@ -17,6 +18,7 @@ struct TimerEvent {
 	iocpCallback callback;
 	std::chrono::system_clock::time_point startTime;
 	int targetId;
+	MiniOver* bufOver;
 	char buffer[MESSAGE_MAX_BUFFER];
 	bool hasBuffer;
 
@@ -34,7 +36,6 @@ constexpr bool TimerEvent::operator==(const TimerEvent& L) const {
 }
 
 class TimerQueue : public removable_priority_queue<TimerEvent> {
-	std::atomic_int size;
 public:
 	std::mutex timerLock;
 	// TODO Add할때 id 리턴받고 그거 바탕으로 지워야할듯 근데 당장은 쓸일없음
@@ -52,33 +53,35 @@ public:
 	//	return false;
 	//}
 	void remove_all(const int playerId);
+};
+
+struct TimerQueueRemainTime {
+	TimerQueue* timerQueue;
+	std::chrono::time_point<std::chrono::system_clock> startTime;
 	
-	void push(const TimerEvent& event) {
-		++size;
-		removable_priority_queue<TimerEvent>::push(event);
-	}
-	void push(TimerEvent&& event) {
-		++size;
-		removable_priority_queue<TimerEvent>::push(event);
-	}
-	void pop() {
-		--size;
-		removable_priority_queue<TimerEvent>::pop();
+	TimerQueueRemainTime(TimerQueue* timerQueue, std::chrono::time_point<std::chrono::system_clock> startTime):timerQueue(timerQueue), startTime(startTime){
+		
 	}
 };
 
-constexpr int TIMER_QUEUE_COUNT = 512;
+constexpr int TIMER_QUEUE_COUNT = THREAD_COUNT;
+constexpr auto THREAD_WAITTIME = std::chrono::milliseconds(10) / TIMER_QUEUE_COUNT;
 
 class TimerQueueManager {
 	static std::array<TimerQueue, TIMER_QUEUE_COUNT> timerQueues;
+	static std::array<std::chrono::time_point<std::chrono::system_clock>, TIMER_QUEUE_COUNT> startTime;
+	static std::unordered_map<int, std::chrono::time_point<std::chrono::system_clock>> ignoreTime;
+	static std::mutex ignoreTimeLock;
 	static HANDLE hIocp;
 
 public:
-	static void Add(TimerEvent& event);
+	static void Add(TimerEvent& event, int threadIdx);
 
 	static void RemoveAll(int playerId);
 
-	static void Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback);
+	static void Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback);
+
+	static void Post(int obj, int threadIdx, iocpCallback callback);
 
 	static void Do();
 

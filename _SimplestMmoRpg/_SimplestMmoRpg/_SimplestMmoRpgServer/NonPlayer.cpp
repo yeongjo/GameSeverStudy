@@ -7,22 +7,24 @@
 //#pragma comment(lib, "lua54.lib")
 
 int LuaAddEventSendMess(lua_State* L) {
-	int recverId = lua_tointeger(L, -4);
-	int senderId = lua_tointeger(L, -3);
-	const char* mess = lua_tostring(L, -2);
-	int delay = lua_tointeger(L, -1);
+	int recverId = lua_tointeger(L, -5);
+	int senderId = lua_tointeger(L, -4);
+	const char* mess = lua_tostring(L, -3);
+	int delay = lua_tointeger(L, -2);
+	int threadIdx = lua_tointeger(L, -1);
 	lua_pop(L, 5);
-	TimerQueueManager::Add(recverId, delay, nullptr, [=](int size) {
-		Player::Get(recverId)->SendChat(senderId, mess);
+	TimerQueueManager::Add(recverId, delay, threadIdx, nullptr, [=](int size, int threadIdx) {
+		Player::Get(recverId)->SendChat(senderId, mess, threadIdx);
 		});
 	return 1;
 }
 
 int LuaTakeDamage(lua_State* L) {
-	int obj_id = lua_tointeger(L, -2);
-	int attackerId = lua_tointeger(L, -1);
+	int obj_id = lua_tointeger(L, -3);
+	int attackerId = lua_tointeger(L, -2);
+	int threadIdx = lua_tointeger(L, -1);
 	lua_pop(L, 3);
-	Actor::Get(obj_id)->TakeDamage(attackerId);
+	Actor::Get(obj_id)->TakeDamage(attackerId, threadIdx);
 	return 1;
 }
 
@@ -42,23 +44,25 @@ int LuaGetY(lua_State* L) {
 }
 
 int LuaSetPos(lua_State* L) {
-	int id = lua_tointeger(L, -3);
-	int x = lua_tointeger(L, -2);
-	int y = lua_tointeger(L, -1);
-	lua_pop(L, 3);
+	int id = lua_tointeger(L, -4);
+	int x = lua_tointeger(L, -3);
+	int y = lua_tointeger(L, -2);
+	int threadIdx = lua_tointeger(L, -1);
+	lua_pop(L, 5);
 	auto actor = Actor::Get(id);
 	actor->LuaUnLock();
-	actor->SetPos(x, y);
+	actor->SetPos(x, y, threadIdx);
 	actor->LuaLock();
 	return 1;
 }
 
 int LuaSendMess(lua_State* L) {
-	int recverId = lua_tointeger(L, -3);
-	int senderId = lua_tointeger(L, -2);
-	const char* mess = lua_tostring(L, -1);
+	int recverId = lua_tointeger(L, -4);
+	int senderId = lua_tointeger(L, -3);
+	const char* mess = lua_tostring(L, -2);
+	int threadIdx = lua_tointeger(L, -1);
 	lua_pop(L, 4);
-	Player::Get(recverId)->SendChat(senderId, mess);
+	Player::Get(recverId)->SendChat(senderId, mess, threadIdx);
 	return 1;
 }
 int LauGetHp(lua_State* L) {
@@ -81,19 +85,20 @@ int LuaGetExp(lua_State* L) {
 }
 
 int LuaSendStatChange(lua_State* L) {
-	int targetId = lua_tointeger(L, -5);
-	int orderId = lua_tointeger(L, -4);
-	int hp = lua_tointeger(L, -3);
-	int level = lua_tointeger(L, -2);
-	int exp = lua_tointeger(L, -1);
-	lua_pop(L, 5);
+	int targetId = lua_tointeger(L, -6);
+	int orderId = lua_tointeger(L, -5);
+	int hp = lua_tointeger(L, -4);
+	int level = lua_tointeger(L, -3);
+	int exp = lua_tointeger(L, -2);
+	int threadIdx = lua_tointeger(L, -1);
+	lua_pop(L, 7);
 	auto actor = Actor::Get(targetId);
 	if (orderId != targetId) { // 자기 자신건 변경 할 필요없다. 그리고 변경하려하면 락이 문제가 됨
 		actor->SetHp(hp);
 		actor->SetLevel(level);
-		actor->SetExp(exp);
+		actor->SetExp(exp, threadIdx);
 	}
-	actor->SendStatChange();
+	actor->SendStatChange(threadIdx);
 	return 1;
 }
 
@@ -104,15 +109,15 @@ int LuaPrint(lua_State* L) {
 	return 1;
 }
 
-int LuaAddEventNpcRandomMove(lua_State* L) {
-	int p_id = lua_tointeger(L, -2);
-	int delay = lua_tointeger(L, -1);
-	lua_pop(L, 3);
-	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
-		Actor::Get(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
-		});
-	return 1;
-}
+//int LuaAddEventNpcRandomMove(lua_State* L) {
+//	int p_id = lua_tointeger(L, -2);
+//	int delay = lua_tointeger(L, -1);
+//	lua_pop(L, 3);
+//	TimerQueueManager::Add(p_id, delay, nullptr, [=](int size) {
+//		Actor::Get(p_id)->Move(static_cast<DIRECTION>(rand() % 4));
+//		});
+//	return 1;
+//}
 int LuaIsMovable(lua_State* L) {
 	int x = lua_tointeger(L, -2);
 	int y = lua_tointeger(L, -1);
@@ -128,20 +133,22 @@ void NonPlayer::Init() {
 	InitSector();
 }
 
-void NonPlayer::OnNearActorWithPlayerMove(int actorId) {
+void NonPlayer::OnNearActorWithPlayerMove(int actorId, int threadIdx) {
 	std::lock_guard<std::mutex> lock(luaLock);
 	SetLuaPosWithoutLock();
 	lua_getglobal(L, "OnNearActorWithPlayerMove");
 	lua_pushnumber(L, actorId);
-	CallLuaFunction(L, 1, 0);
+	lua_pushnumber(L, threadIdx);
+	CallLuaFunction(L, 2, 0);
 }
 
-bool NonPlayer::TakeDamage(int attackerId) {
+bool NonPlayer::TakeDamage(int attackerId, int threadIdx) {
 	std::lock_guard<std::mutex> lock(luaLock);
 	lua_getglobal(L, "TakeDamage");
 	lua_pushinteger(L, attackerId);
 	lua_pushinteger(L, Actor::Get(attackerId)->GetDamage());
-	CallLuaFunction(L, 2, 1);
+	lua_pushinteger(L, threadIdx);
+	CallLuaFunction(L, 3, 1);
 	auto result = lua_toboolean(L, -1);
 	lua_pop(L, 1);
 	return result;
@@ -175,7 +182,7 @@ int NonPlayer::GetNearestPlayer() {
 	return nearestId;
 }
 
-void NonPlayer::SetExp(int exp) {
+void NonPlayer::SetExp(int exp, int threadIdx) {
 	std::lock_guard<std::mutex> lock(luaLock);
 	lua_pushnumber(L, exp);
 	lua_setglobal(L, "mExp");
@@ -193,7 +200,7 @@ void NonPlayer::SetHp(int hp) {
 	lua_setglobal(L, "mHp");
 }
 
-void NonPlayer::SendStatChange() {
+void NonPlayer::SendStatChange(int threadIdx) {
 	{
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet){
@@ -201,20 +208,20 @@ void NonPlayer::SendStatChange() {
 			if (Actor::Get(viewId)->IsNpc()){
 				continue;
 			}
-			Player::Get(viewId)->SendChangedStat(id, GetHpWithoutLock(), GetLevelWithoutLock(), GetExpWithoutLock());
+			Player::Get(viewId)->SendChangedStat(id, GetHpWithoutLock(), GetLevelWithoutLock(), GetExpWithoutLock(), threadIdx);
 		}
 	}
 	if (GetHpWithoutLock() == 0){
-		TimerQueueManager::Add(id, 1, nullptr, [this](int) {
-			Die();
+		TimerQueueManager::Post(id, threadIdx, [this](int,int threadIdx2) {
+			Die(threadIdx2);
 		});
 	}
 }
 
-void NonPlayer::AddNpcLoopEvent() {
-	TimerQueueManager::Add(id, 1000, nullptr, [&](int) {
-		AddNpcLoopEvent();
-		Actor::Get(id)->Update();
+void NonPlayer::AddNpcLoopEvent(int threadIdx) {
+	TimerQueueManager::Add(id, 1000, threadIdx, nullptr, [&](int, int threadIdx2) {
+		AddNpcLoopEvent(threadIdx2);
+		Actor::Get(id)->Update(threadIdx2);
 	});
 }
 
@@ -241,7 +248,7 @@ void NonPlayer::InitLua(const char* path) {
 	lua_register(L, "LuaGetExp", LuaGetExp);
 	lua_register(L, "LuaTakeDamage", LuaTakeDamage);
 	lua_register(L, "LuaPrint", LuaPrint);
-	lua_register(L, "LuaAddEventNpcRandomMove", LuaAddEventNpcRandomMove);
+	//lua_register(L, "LuaAddEventNpcRandomMove", LuaAddEventNpcRandomMove);
 	lua_register(L, "LuaAddEventSendMess", LuaAddEventSendMess);
 	lua_register(L, "LuaIsMovable", LuaIsMovable);
 	lua_register(L, "LuaSetPathStartAndTarget", [](lua_State* L) {
@@ -256,22 +263,24 @@ void NonPlayer::InitLua(const char* path) {
 		return 1;
 		});
 	lua_register(L, "LuaMoveToConsiderWall", [](lua_State* L) {
-		auto id = lua_tointeger(L, -3);
-		auto targetX = lua_tointeger(L, -2);
-		auto targetY = lua_tointeger(L, -1);
+		auto id = lua_tointeger(L, -4);
+		auto targetX = lua_tointeger(L, -3);
+		auto targetY = lua_tointeger(L, -2);
+		auto threadIdx = lua_tointeger(L, -1);
 		lua_pop(L, 4);
 		auto actor = Actor::Get(id);
 		actor->LuaUnLock();
-		actor->MoveToConsiderWall(targetX, targetY);
+		actor->MoveToConsiderWall(targetX, targetY, threadIdx);
 		actor->LuaLock();
 		return 1;
 	});
 	lua_register(L, "LuaRandomMove", [](lua_State* L) {
-		auto id = lua_tointeger(L, -1);
+		auto id = lua_tointeger(L, -2);
+		auto threadIdx = lua_tointeger(L, -1);
 		lua_pop(L, 2);
 		auto actor = Actor::Get(id);
 		actor->LuaUnLock();
-		actor->RandomMove();
+		actor->RandomMove(threadIdx);
 		actor->LuaLock();
 		return 1;
 	});
@@ -299,18 +308,18 @@ void NonPlayer::InitLua(const char* path) {
 
 }
 
-void NonPlayer::AddToViewSet(int otherId) {
-	Actor::AddToViewSet(otherId);
-	WakeUpNpc();
+void NonPlayer::AddToViewSet(int otherId, int threadIdx) {
+	Actor::AddToViewSet(otherId, threadIdx);
+	WakeUpNpc(threadIdx);
 }
 
-void NonPlayer::Die() {
+void NonPlayer::Die(int threadIdx) {
 	isDead = true;
-	Actor::Die();
+	Actor::Die(threadIdx);
 	SleepNpc();
 }
 
-void NonPlayer::WakeUpNpc() {
+void NonPlayer::WakeUpNpc(int threadIdx) {
 	if(isDead){
 		return;
 	}
@@ -318,7 +327,7 @@ void NonPlayer::WakeUpNpc() {
 		bool old_state = false;
 		if (true == std::atomic_compare_exchange_strong(&isActive, &old_state, true)){
 			//std::cout << "wake up id: " << id << " is active: " << isActive << std::endl;
-			AddNpcLoopEvent();
+			AddNpcLoopEvent(threadIdx);
 		}
 	}
 }
@@ -349,7 +358,7 @@ void NonPlayer::SetLuaPosWithoutLock() const {
 	lua_setglobal(L, "mY");
 }
 
-void NonPlayer::SetPos(int x, int y) {
+void NonPlayer::SetPos(int x, int y, int threadIdx) {
 	if (this->x == x && this->y == y) {
 		return;
 	}
@@ -383,15 +392,15 @@ void NonPlayer::SetPos(int x, int y) {
 		cout << " & 아무에게도 안보여서 취침" << endl;
 #endif
 		for (auto otherId : oldViewList) {
-			Actor::Get(otherId)->RemoveFromViewSet(id);
+			Actor::Get(otherId)->RemoveFromViewSet(id, threadIdx);
 		}
 		return;
 	}
 	for (auto otherId : newViewList) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			// 플레이어의 시야에 등장
-			AddToViewSet(otherId);
-			Player::Get(otherId)->AddToViewSet(id);
+			AddToViewSet(otherId, threadIdx);
+			Player::Get(otherId)->AddToViewSet(id, threadIdx);
 #ifdef NPCLOG
 			cout << " &[" << otherId << "]에게 등장";
 #endif
@@ -400,13 +409,13 @@ void NonPlayer::SetPos(int x, int y) {
 #ifdef NPCLOG
 			cout << " &[" << otherId << "]에게 위치 갱신";
 #endif
-			Player::Get(otherId)->SendMove(id);
+			Player::Get(otherId)->SendMove(id, threadIdx);
 		}
 	}
 	for (auto otherId : oldViewList) {
 		if (newViewList.end() == std::find(newViewList.begin(), newViewList.end(), otherId)) {
-			RemoveFromViewSet(otherId);
-			Actor::Get(otherId)->RemoveFromViewSet(id);
+			RemoveFromViewSet(otherId, threadIdx);
+			Actor::Get(otherId)->RemoveFromViewSet(id, threadIdx);
 #ifdef NPCLOG
 			cout << " &[" << otherId << "]에게서 사라짐";
 #endif
@@ -417,7 +426,7 @@ void NonPlayer::SetPos(int x, int y) {
 #endif
 }
 
-MiniOver* NonPlayer::GetOver() {
+MiniOver* NonPlayer::GetOver(int threadIdx) {
 	memset(&miniOver.over, 0, sizeof(miniOver.over));
 	return &miniOver;
 }

@@ -48,7 +48,7 @@ void Monster::Init(WorldManager::FileMonster& monster) {
 	InitLua(monster.script.c_str());
 	SetHp(monster.hp);
 	SetLevel(monster.level);
-	SetExp(monster.exp);
+	SetExp(monster.exp, 0); // 플레이어 관련된거만 스레드 인덱스 사용
 	SetDamage(monster.damage);
 	SetCanFindWay(monster.canFindWay);
 
@@ -70,7 +70,7 @@ inline void Monster::SetDamage(int damage) {
 	lua_setglobal(L, "mDamage");
 }
 
-void Monster::Update() {
+void Monster::Update(int threadIdx) {
 	std::lock_guard<std::mutex> lock(monsterLock);
 	{
 		std::lock_guard<std::mutex> lockLua(luaLock);
@@ -99,6 +99,6 @@ void Monster::Update() {
 		int tx = x;
 		int ty = y;
 		pathFindHelper->GetNextPos(tx, ty);
-		MoveTo(tx, ty);
+		MoveTo(tx, ty, threadIdx);
 	}
 }

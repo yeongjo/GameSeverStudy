@@ -23,54 +23,54 @@ public:
 
 	void Init() override;
 
-	void SetPos(int x, int y) override;
+	void SetPos(int x, int y, int threadIdx) override;
 	
-	void SendStatChange() override;
+	void SendStatChange(int threadIdx) override;
 
-	virtual void Disconnect();
+	virtual void Disconnect(int threadIdx);
 
-	virtual void Attack();
+	virtual void Attack(int threadIdx);
 
-	bool TakeDamage(int attackerId) override;
+	bool TakeDamage(int attackerId, int threadIdx) override;
 
-	void Die() override;
+	void Die(int threadIdx) override;
 
-	void AddToViewSet(int otherId) override;
+	void AddToViewSet(int otherId, int threadIdx) override;
 
-	void RemoveFromViewSet(int otherId) override;
+	void RemoveFromViewSet(int otherId, int threadIdx) override;
 
-	void SendLoginOk();
+	void SendLoginOk(int threadIdx);
 
-	void SendChat(int senderId, const char* mess);
+	void SendChat(int senderId, const char* mess, int threadIdx);
 
-	void SendMove(int p_id);
+	void SendMove(int p_id, int threadIdx);
 
-	void SendAddActor(int addedId);
+	void SendAddActor(int addedId, int threadIdx);
 
-	void SendRemoveActor(int removeTargetId);
+	void SendRemoveActor(int removeTargetId, int threadIdx);
 
-	void SendChangedStat(int statChangedId, int hp, int level, int exp);
+	void SendChangedStat(int statChangedId, int hp, int level, int exp, int threadIdx);
 
 	void CallRecv();
 
 	int GetId() const { return id; }
-	MiniOver* GetOver() override;
 	Session* GetSession() { return &session; }
 	int GetHp() override { return hp; }
 	int GetLevel() override { return level; }
 	int GetExp() override { return exp; }
 	int GetDamage() override { return damage; }
-	void SetExp(int exp) override;
+	void SetExp(int exp, int threadIdx) override;
 	void SetLevel(int level) override;
 	void SetHp(int hp) override;
+	MiniOver* GetOver(int threadIdx) { return session.bufOverManager.Get(threadIdx); }
 
 private:
 	/// <summary>
 	/// 한 스레드에서만 호출안되기때문에 lock 안걸어도됨
 	/// </summary>
 	/// <param name="id"></param>
-	void ProcessPacket(unsigned char* buf);
+	void ProcessPacket(unsigned char* buf, int threadIdx);
 
-	void AddHealTimer();
+	void AddHealTimer(int threadIdx);
 };
 

@@ -8,6 +8,6 @@ void Npc::Init() {
 	InitLua("npc.lua");
 }
 
-void Npc::Update() {
-	Move(static_cast<DIRECTION>(rand() % 4));
+void Npc::Update(int threadIdx) {
+	Move(static_cast<DIRECTION>(rand() % 4), threadIdx);
 }

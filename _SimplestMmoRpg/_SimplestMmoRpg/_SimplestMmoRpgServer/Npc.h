@@ -17,6 +17,6 @@ public:
 
 	void Init() override;
 
-	void Update() override;
+	void Update(int threadIdx) override;
 };
 

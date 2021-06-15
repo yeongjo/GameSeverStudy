@@ -12,7 +12,7 @@ typedef std::function<void(int, int)> iocpCallback; // recvBytes, threadIndex
 struct MiniOver {
 	WSAOVERLAPPED	over; // 클래스 생성자에서 초기화하니 값이 원래대로 돌아온다??
 	iocpCallback callback;
-	virtual void Recycle() {}
+	virtual void Recycle(int threadIdx) {}
 };
 struct AcceptOver : public MiniOver {
 	SOCKET			cSocket;					// OP_ACCEPT에서만 사용
@@ -33,7 +33,7 @@ public:
 		memset(&over, 0, sizeof(over));
 	}
 
-	void Recycle() override {}
+	void Recycle(int threadIdx) override {}
 
 	friend BufOverManager;
 private:
@@ -48,6 +48,7 @@ private:
 struct BufOver : public BufOverBase {
 	WSABUF			wsabuf[1];
 	std::vector<unsigned char>	packetBuf;
+	int threadIdx;
 private:
 	BufOverManager* manager;
 public:
@@ -58,7 +59,7 @@ public:
 		packetBuf.resize(SEND_MAX_BUFFER);
 	}
 
-	void Recycle() override;
+	void Recycle(int threadIdx) override;
 
 	friend BufOverManager;
 private:
@@ -72,5 +73,5 @@ private:
 };
 struct RecvOver : public BufOverBase {
 	unsigned char packetBuf[RECV_MAX_BUFFER];
-	void Recycle() override {}
+	void Recycle(int threadIdx) override {}
 };

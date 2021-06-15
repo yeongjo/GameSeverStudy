@@ -22,15 +22,15 @@ protected:
 
 	void Init() override;
 
-	void OnNearActorWithPlayerMove(int actorId) override;
+	void OnNearActorWithPlayerMove(int actorId, int threadIdx) override;
 
-	bool TakeDamage(int attackerId) override;
+	bool TakeDamage(int attackerId, int threadIdx) override;
 
-	void AddToViewSet(int otherId) override;
+	void AddToViewSet(int otherId, int threadIdx) override;
 
-	void Die() override;
+	void Die(int threadIdx) override;
 
-	void WakeUpNpc();
+	void WakeUpNpc(int threadIdx);
 
 	void SleepNpc();
 
@@ -40,9 +40,9 @@ protected:
 
 	void SetLuaPos();
 	void SetLuaPosWithoutLock() const;
-	void SetPos(int x, int y) override;
+	void SetPos(int x, int y, int threadIdx) override;
 
-	MiniOver* GetOver() override;
+	MiniOver* GetOver(int threadIdx) override;
 
 	int GetHpWithoutLock() const;
 
@@ -64,14 +64,14 @@ protected:
 	/// <returns></returns>
 	int GetNearestPlayer();
 
-	void SetExp(int exp) override;
+	void SetExp(int exp, int threadIdx) override;
 
 	void SetLevel(int level) override;
 
 	void SetHp(int hp) override;
 
 private:
-	void SendStatChange() override;
+	void SendStatChange(int threadIdx) override;
 
-	void AddNpcLoopEvent();
+	void AddNpcLoopEvent(int threadIdx);
 };

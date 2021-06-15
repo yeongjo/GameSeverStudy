@@ -50,7 +50,7 @@
 //#define PLAYERLOG
 //#define NPCLOG
 //#define PLAYER_NOT_RANDOM_SPAWN
-//#define DISPLAYLOG
+#define DISPLAYLOG
 //#define DBLOG
 #include "Db.h"
 #include "LuaUtil.h"
@@ -104,7 +104,8 @@ std::string random_string(std::size_t length) {
 	return random_string;
 }
 
-void Worker(HANDLE hIocp, int threadIndex) {
+void Worker(HANDLE hIocp, int threadIdx) {
+	int threadIdx2 = threadIdx;
 	while (true) {
 		DWORD recvBufSize;
 		ULONG_PTR recvKey;
@@ -120,16 +121,16 @@ void Worker(HANDLE hIocp, int threadIndex) {
 				cout << "서버키가 Key로 넘어옴" << endl;
 				exit(-1);
 			}
-			Player::Get(key)->Disconnect();
+			Player::Get(key)->Disconnect(threadIdx2);
 		}
 		if ((key != SERVER_ID) && (0 == recvBufSize)) {
-			Player::Get(key)->Disconnect();
+			Player::Get(key)->Disconnect(threadIdx2);
 			continue;
 		}
 		auto over = reinterpret_cast<MiniOver*>(reinterpret_cast<char*>(recvOver)-sizeof(void*)); // vtable 로 인해 포인터 바이트수 만큼 뺌
 
-		over->callback(recvBufSize, threadIndex);
-		over->Recycle();
+		over->callback(recvBufSize, threadIdx2);
+		over->Recycle(threadIdx2);
 	}
 }
 
@@ -148,12 +149,12 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 
 int main() {
 	wcout.imbue(locale("korean"));
-	for (size_t i = 0; i < 5; i++) {
-		if (DB::Create()) {
-			break;
-		}
-		cout << "DB 연결 실패로 다시 시도: "<< i+1<<"회\n";
-	}
+	//for (size_t i = 0; i < 5; i++) {
+	//	if (DB::Create()) {
+	//		break;
+	//	}
+	//	cout << "DB 연결 실패로 다시 시도: "<< i+1<<"회\n";
+	//}
 	
 	WorldManager::Get()->Generate();
 	WorldManager::Get()->Load();
@@ -189,10 +190,11 @@ int main() {
 	accept_over.callback = [&](int,int) {
 		int acceptId = Player::GetNewId(accept_over.cSocket);
 		if (-1 != acceptId) {
-			auto session = Player::Get(acceptId)->GetSession();
+			auto player = Player::Get(acceptId);
+			auto session = player->GetSession();
 			CreateIoCompletionPort(
 				reinterpret_cast<HANDLE>(session->socket), hIocp, acceptId, 0);
-			Player::Get(acceptId)->CallRecv();
+			player->CallRecv();
 		} else {
 			closesocket(accept_over.cSocket);
 			cout << "인원 수 꽉참" << endl;
@@ -205,8 +207,10 @@ int main() {
 
 	thread timer_thread(TimerQueueManager::Do);
 	vector <thread> worker_threads;
-	for (int i = 0; i < 4; ++i)
-		worker_threads.emplace_back(Worker, hIocp, i);
+	for (int i = 0; i < 4; ++i){
+		int i2 = i;
+		worker_threads.emplace_back(Worker, hIocp, i2);
+	}
 	for (auto& th : worker_threads)
 		th.join();
 	closesocket(listenSocket);

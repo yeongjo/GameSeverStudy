@@ -3,15 +3,15 @@
 constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
-//#define QUICKTEST
-#define MEDIUMTEST
+#define QUICKTEST
+//#define MEDIUMTEST
 #if defined(QUICKTEST)
-constexpr int MAX_USER = 7000;
-constexpr int NPC_ID_START = 5000;
+constexpr int MAX_USER = 30000;
+constexpr int NPC_ID_START = 10000;
 #define WORLD_WIDTH		2000
 #define WORLD_HEIGHT	2000
 #elif defined(MEDIUMTEST)
-constexpr int MAX_USER = 135000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
+constexpr int MAX_USER = 45000;                // 서버내의 최대 객체 개수,  객체 ID의 최대 값
 constexpr int NPC_ID_START = 10000;		// NPC의 ID가 시작하는 지점, 따라서 플레이어는 0부터 NPC_ID_START까지의 ID를 가짐
 					// NPC의 개수는 MAX_USER - NPC_ID_START = 20000,  20만 마리의 NPC가 존재
 #define WORLD_WIDTH	2000
@@ -169,3 +169,6 @@ constexpr int MAX_NAME= MAX_ID_LEN;
 enum DIRECTION { D_N, D_S, D_W, D_E, D_NO };
 enum ETile { Empty, Wall };
 constexpr const char* MAP_PATH = "../../map.bmp";
+constexpr size_t THREAD_COUNT = 4;
+constexpr auto INVERSE_THREAD_COUNT = 1.0f/ THREAD_COUNT;
+

@@ -44,7 +44,7 @@ void Player::Init() {
 	y = ty;
 }
 
-void Player::Disconnect() {
+void Player::Disconnect(int threadIdx) {
 	if (session.state == PLST_FREE){
 		return;
 	}
@@ -56,10 +56,11 @@ void Player::Disconnect() {
 		session.recvedBuf.clear();
 	}
 	session.bufOverManager.ClearSendingData();
-	RemoveFromAll();
+	RemoveFromAll(threadIdx);
+	session.bufOverManager.SendAddedData(threadIdx);
 }
 
-void Player::Attack() {
+void Player::Attack(int threadIdx) {
 	viewSetLock.lock();
 	int size = viewSet.size();
 	attackViewList.resize(size);
@@ -69,45 +70,45 @@ void Player::Attack() {
 		auto actor = Actor::Get(attackViewList[i]);
 		if (actor->IsMonster()){
 			if (abs(x - actor->GetX()) + abs(y - actor->GetY()) <= 1){
-				actor->TakeDamage(id);
+				actor->TakeDamage(id, threadIdx);
 			}
 		}
 		++i;
 	}
 }
 
-void Player::Die() {
+void Player::Die(int threadIdx) {
 	//Actor::Die();
 	//SendRemoveActor(id, id); // 삭제는 안하고 위치 옮기고 경험치 반 HP 회복해서 시작위치로
-	SetPos(initX, initY);
+	SetPos(initX, initY, threadIdx);
 	hp = maxHp;
 	exp = exp >> 1;
-	SendStatChange();
+	SendStatChange(threadIdx);
 }
 
-void Player::AddToViewSet(int otherId) {
+void Player::AddToViewSet(int otherId, int threadIdx) {
 	viewSetLock.lock();
 	if (0 == viewSet.count(id)){
 		viewSet.insert(otherId);
 		viewSetLock.unlock();
-		SendAddActor(otherId);
+		SendAddActor(otherId, threadIdx);
 		return;
 	}
 	viewSetLock.unlock();
 }
 
-void Player::RemoveFromViewSet(int otherId) {
+void Player::RemoveFromViewSet(int otherId, int threadIdx) {
 	viewSetLock.lock();
 	if (0 != viewSet.count(otherId)){
 		viewSet.erase(otherId);
 		viewSetLock.unlock();
-		SendRemoveActor(otherId);
+		SendRemoveActor(otherId, threadIdx);
 		return;
 	}
 	viewSetLock.unlock();
 }
 
-void Player::SendLoginOk() {
+void Player::SendLoginOk(int threadIdx) {
 	sc_packet_login_ok p;
 	p.size = sizeof(p);
 	p.type = SC_LOGIN_OK;
@@ -117,19 +118,19 @@ void Player::SendLoginOk() {
 	p.HP = GetHp();
 	p.LEVEL = GetLevel();
 	p.EXP = GetExp();
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
-void Player::SendChat(int senderId, const char* mess) {
+void Player::SendChat(int senderId, const char* mess, int threadIdx) {
 	sc_packet_chat p;
 	p.id = senderId;
 	p.size = sizeof(p);
 	p.type = SC_CHAT;
 	strcpy_s(p.message, mess);
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
-void Player::SendMove(int p_id) {
+void Player::SendMove(int p_id, int threadIdx) {
 	sc_packet_position p;
 	p.id = p_id;
 	p.size = sizeof(p);
@@ -138,10 +139,10 @@ void Player::SendMove(int p_id) {
 	p.x = actor->GetX();
 	p.y = actor->GetY();
 	p.move_time = actor->GetMoveTime();
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
-void Player::SendAddActor(int addedId) {
+void Player::SendAddActor(int addedId, int threadIdx) {
 	sc_packet_add_object p;
 	p.id = addedId;
 	p.size = sizeof(p);
@@ -154,10 +155,10 @@ void Player::SendAddActor(int addedId) {
 	p.LEVEL = 1;
 	p.EXP = 1;
 	strcpy_s(p.name, actor->GetName().c_str());
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
-void Player::SendChangedStat(int statChangedId, int hp, int level, int exp) {
+void Player::SendChangedStat(int statChangedId, int hp, int level, int exp, int threadIdx) {
 	sc_packet_stat_change p;
 	p.id = statChangedId;
 	p.size = sizeof(p);
@@ -165,19 +166,16 @@ void Player::SendChangedStat(int statChangedId, int hp, int level, int exp) {
 	p.HP = hp;
 	p.LEVEL = level;
 	p.EXP = exp;
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
-MiniOver* Player::GetOver() {
-	return session.bufOverManager.Get();
-}
 Player::Player(int id) : Actor(id), session(this) {
 	actors[id] = this;
 	session.state = PLST_FREE;
 	session.recvOver.wsabuf[0].buf =
 		reinterpret_cast<char*>(&session.recvOver.packetBuf[0]);
 	session.recvOver.wsabuf[0].len = RECV_MAX_BUFFER;
-	session.recvOver.callback = [this](int bufSize) {
+	session.recvOver.callback = [this](int bufSize, int threadIdx) {
 		auto exOver = session.recvOver;
 		unsigned char* recvPacketPtr;
 		auto totalRecvBufSize = static_cast<unsigned char>(bufSize);
@@ -188,7 +186,7 @@ Player::Player(int id) : Actor(id), session(this) {
 			session.recvedBuf.resize(prevPacketSize);
 			memcpy(1 + &session.recvedBuf.back(), &exOver.packetBuf[0], splitBufSize);
 			recvPacketPtr = &session.recvedBuf[0];
-			ProcessPacket(recvPacketPtr);
+			ProcessPacket(recvPacketPtr, threadIdx);
 			recvPacketPtr = &exOver.packetBuf[0] + splitBufSize;
 			totalRecvBufSize -= splitBufSize;
 		}
@@ -199,7 +197,7 @@ Player::Player(int id) : Actor(id), session(this) {
 		for (unsigned char recvPacketSize = recvPacketPtr[0];
 		     0 < totalRecvBufSize;
 		     recvPacketSize = recvPacketPtr[0]){
-			ProcessPacket(recvPacketPtr);
+			ProcessPacket(recvPacketPtr, threadIdx);
 			totalRecvBufSize -= recvPacketSize;
 			recvPacketPtr += recvPacketSize;
 		}
@@ -219,13 +217,13 @@ Player::Player(int id) : Actor(id), session(this) {
 	};
 }
 
-void Player::SetPos(int x, int y) {
+void Player::SetPos(int x, int y, int threadIdx) {
 	auto prevX = this->x;
 	auto prevY = this->y;
 	this->x = x;
 	this->y = y;
 
-	SendMove(id);
+	SendMove(id, threadIdx);
 
 	Sector::Move(id, prevX, prevY, x, y);
 
@@ -237,12 +235,12 @@ void Player::SetPos(int x, int y) {
 	for (auto otherId : new_vl) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			//1. 새로 시야에 들어오는 플레이어
-			AddToViewSet(otherId);
-			Actor::Get(otherId)->AddToViewSet(id);
+			AddToViewSet(otherId, threadIdx);
+			Actor::Get(otherId)->AddToViewSet(id, threadIdx);
 		} else {
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
 			if (!Actor::Get(otherId)->IsNpc()) {
-				Player::Get(otherId)->SendMove(id);
+				Player::Get(otherId)->SendMove(id, threadIdx);
 			} else {
 #ifdef PLAYERLOG
 				{
@@ -254,7 +252,7 @@ void Player::SetPos(int x, int y) {
 				auto tx = actor->GetX();
 				auto ty = actor->GetY();
 				if(x==tx&&y==ty){
-					actor->OnNearActorWithPlayerMove(id);
+					actor->OnNearActorWithPlayerMove(id, threadIdx);
 				}
 			}
 		}
@@ -262,33 +260,33 @@ void Player::SetPos(int x, int y) {
 	for (auto otherId : oldViewList) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), otherId)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			RemoveFromViewSet(otherId);
-			Actor::Get(otherId)->RemoveFromViewSet(id);
+			RemoveFromViewSet(otherId, threadIdx);
+			Actor::Get(otherId)->RemoveFromViewSet(id, threadIdx);
 		}
 	}
 }
 
-void Player::SendStatChange() {
+void Player::SendStatChange(int threadIdx) {
 	DB::UpdateStat(wname, hp, level, exp, x, y);
-	SendChangedStat(id, hp, level, exp);
-	Actor::SendStatChange();
+	SendChangedStat(id, hp, level, exp, threadIdx);
+	Actor::SendStatChange(threadIdx);
 }
 
-bool Player::TakeDamage(int attackerId) {
+bool Player::TakeDamage(int attackerId, int threadIdx) {
 	hp -= damage;
 	if (hp < 0) {
 		hp = 0;
-		SendStatChange();
+		SendStatChange(threadIdx);
 		return true;
 	}
 	if(hp == maxHp - 1){
-		AddHealTimer();
+		AddHealTimer(threadIdx);
 	}
-	SendStatChange();
+	SendStatChange(threadIdx);
 	return false;
 }
 
-void Player::SetExp(int exp) {
+void Player::SetExp(int exp, int threadIdx) {
 	auto level = GetLevel();
 	auto levelMinusOne = level - 1;
 	auto requireExp = levelMinusOne * 100 + 100;
@@ -297,22 +295,22 @@ void Player::SetExp(int exp) {
 		exp -= requireExp;
 	}
 	this->exp = exp;
-	SendStatChange();
+	SendStatChange(threadIdx);
 }
 
 void Player::SetLevel(int level) { this->level = level; }
 
 void Player::SetHp(int hp) { this->hp = hp; }
 
-void Player::ProcessPacket(unsigned char* buf) {
+void Player::ProcessPacket(unsigned char* buf, int threadIdx) {
 	switch (buf[1]) {
 	case CS_LOGIN: {
 		cs_packet_login* packet = reinterpret_cast<cs_packet_login*>(buf);
 		if(packet->player_id[0] == '\0'){
 			std::cout << "You need to type id not a black" << std::endl;
-			SendChat(id, "You need to type id not a black");
-			session.bufOverManager.SendAddedData();
-			Disconnect();
+			SendChat(id, "You need to type id not a black", threadIdx);
+			session.bufOverManager.SendAddedData(threadIdx);
+			Disconnect(threadIdx);
 			return;
 		}
 		session.state = PLST_INGAME;
@@ -332,7 +330,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 		}
 		isActive = true;
 		InitSector();
-		SendLoginOk();
+		SendLoginOk(threadIdx);
 
 		auto& selected_sector = Sector::GetIdFromOverlappedSector(id);
 
@@ -343,10 +341,10 @@ void Player::ProcessPacket(unsigned char* buf) {
 		viewSetLock.unlock();
 		for (auto otherId : selected_sector) {
 			auto other = Actor::Get(otherId);
-			other->AddToViewSet(id);
-			SendAddActor(otherId);
+			other->AddToViewSet(id, threadIdx);
+			SendAddActor(otherId, threadIdx);
 			if (!other->IsNpc()) {
-				Get(otherId)->SendAddActor(id);
+				Get(otherId)->SendAddActor(id, threadIdx);
 			}
 		}
 		break;
@@ -354,12 +352,12 @@ void Player::ProcessPacket(unsigned char* buf) {
 	case CS_MOVE: {
 		auto packet = reinterpret_cast<cs_packet_move*>(buf);
 		SetMoveTime(packet->move_time);
-		Move(static_cast<DIRECTION>(packet->direction));
+		Move(static_cast<DIRECTION>(packet->direction), threadIdx);
 		break;
 	}
 	case CS_ATTACK: {
 		auto* packet = reinterpret_cast<cs_packet_attack*>(buf);
-		Attack();
+		Attack(threadIdx);
 		break;
 	}
 	case CS_CHAT: {
@@ -367,7 +365,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet) {
 			if (!Actor::Get(viewId)->IsNpc()) {
-				Get(viewId)->SendChat(id, packet->message);
+				Get(viewId)->SendChat(id, packet->message, threadIdx);
 			}
 		}
 		break;
@@ -380,24 +378,24 @@ void Player::ProcessPacket(unsigned char* buf) {
 	}
 }
 
-void Player::AddHealTimer() {
-	TimerQueueManager::Add(id, 5000, []() {return true; }, [this](int) {
+void Player::AddHealTimer(int threadIdx) {
+	TimerQueueManager::Add(id, 5000, threadIdx, []() {return true; }, [this](int, int threadIdx2) {
 		if(GetHp() < maxHp){
 			SetHp(GetHp() + 1);
-			SendStatChange();
+			SendStatChange(threadIdx2);
 			if (GetHp() < maxHp) {
-				AddHealTimer();
+				AddHealTimer(threadIdx2);
 			}
 		}
 	});
 }
 
-void Player::SendRemoveActor(int removeTargetId) {
+void Player::SendRemoveActor(int removeTargetId, int threadIdx) {
 	sc_packet_remove_object p;
 	p.id = removeTargetId;
 	p.size = sizeof(p);
 	p.type = SC_REMOVE_OBJECT;
-	session.bufOverManager.AddSendingData(&p);
+	session.bufOverManager.AddSendingData(&p, threadIdx);
 }
 
 void Player::CallRecv() {

@@ -50,37 +50,37 @@ public:
 
 	void RemoveFromSector() const;
 
-	virtual void Update();
+	virtual void Update(int threadIdx);
 
-	virtual void Move(DIRECTION dir);
+	virtual void Move(DIRECTION dir, int threadIdx);
 
 	virtual void Interact(Actor* interactor) {}
 
-	virtual void OnNearActorWithPlayerMove(int actorId) {}
+	virtual void OnNearActorWithPlayerMove(int actorId, int threadIdx) {}
 
-	virtual void AddToViewSet(int otherId);
+	virtual void AddToViewSet(int otherId, int threadIdx);
 
-	virtual void RemoveFromViewSet(int otherId); // TODO 나중에 RemoveAll 만들어야 lock으로 생긴 느려지는거 줄어듬
+	virtual void RemoveFromViewSet(int otherId, int threadIdx); // TODO 나중에 RemoveAll 만들어야 lock으로 생긴 느려지는거 줄어듬
 
-	virtual void Die();
+	virtual void Die(int threadIdx);
 
-	virtual void RemoveFromAll();
+	virtual void RemoveFromAll(int threadIdx);
 
-	virtual void SendStatChange();
+	virtual void SendStatChange(int threadIdx);
 
 	/// <summary>
 	/// 해당 방향으로 한 칸 이동합니다.
 	/// </summary>
-	void MoveTo(int targetX, int targetY);
+	void MoveTo(int targetX, int targetY, int threadIdx);
 	
 	/// <summary>
 	/// 벽에 부딫히면 막히면서 해당 방향으로 한 칸 이동합니다.
 	/// </summary>
-	void MoveToConsiderWall(int targetX, int targetY);
+	void MoveToConsiderWall(int targetX, int targetY, int threadIdx);
 
-	void RandomMove();
+	void RandomMove(int threadIdx);
 
-	virtual void SetPos(int x, int y) {
+	virtual void SetPos(int x, int y, int threadIdx) {
 		this->x = x;
 		this->y = y;
 	}
@@ -92,7 +92,7 @@ public:
 	/// </summary>
 	/// <param name="attackerId"></param>
 	/// <returns></returns>
-	virtual bool TakeDamage(int attackerId);
+	virtual bool TakeDamage(int attackerId, int threadIdx);
 
 	bool CanSee(int otherId) const;
 
@@ -105,7 +105,7 @@ public:
 
 	bool IsNpc() const;
 
-	virtual void SetExp(int exp);
+	virtual void SetExp(int exp, int threadIdx);
 	virtual void SetLevel(int level);
 	virtual void SetHp(int hp);
 	void SetMoveTime(int moveTime);
@@ -118,7 +118,7 @@ public:
 	virtual int GetExp();
 	virtual int GetDamage();
 	std::vector<int>& GetSelectedSector();
-	virtual MiniOver* GetOver();
+	virtual MiniOver* GetOver(int threadIdx);
 
 	static Actor* Get(int id);
 protected:
@@ -127,11 +127,11 @@ protected:
 
 inline void Actor::SetMoveTime(int moveTime) { this->moveTime = moveTime; }
 
-inline bool Actor::TakeDamage(int attackerId) {
+inline bool Actor::TakeDamage(int attackerId, int threadIdx) {
 	return true;
 }
 
-inline void Actor::AddToViewSet(int otherId) {
+inline void Actor::AddToViewSet(int otherId, int threadIdx) {
 	std::lock_guard<std::mutex> lock(viewSetLock);
 	viewSet.insert(otherId);
 }

@@ -50,7 +50,7 @@ protected:
 	int goalPosIdx = -1, prevPosIdx;
 	WorldManager* worldManager;
 	std::vector<int> straightPath;
-	FindStatus findStatus;
+	FindStatus findStatus = FindStatus::CantFindWay;
 
 	PathFindHelper() {}
 

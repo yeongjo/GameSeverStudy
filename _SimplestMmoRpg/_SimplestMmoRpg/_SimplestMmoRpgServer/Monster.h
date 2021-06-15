@@ -21,12 +21,12 @@ public:
 
 	void SetPathStartAndTarget(int startX, int startY, int targetX, int targetY) const;
 
-	void Update() override;
+	void Update(int threadIdx) override;
 
 	void SetDamage(int damage);
 
-	void Die() override {
-		NonPlayer::Die();
+	void Die(int threadIdx) override {
+		NonPlayer::Die(threadIdx);
 	}
 private:
 	void SetCanFindWay(bool canFindWay);

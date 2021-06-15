@@ -4,7 +4,7 @@
 
 #include "BufOverManager.h"
 
-void BufOver::Recycle() {
+void BufOver::Recycle(int threadIdx) {
 	_ASSERT(manager != nullptr && "manager가 null입니다");
-	manager->Recycle(this);
+	manager->Recycle(this, threadIdx);
 }
