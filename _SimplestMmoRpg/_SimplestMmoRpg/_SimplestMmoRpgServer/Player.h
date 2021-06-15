@@ -4,6 +4,7 @@
 
 class Player : public Actor {
 protected:
+	std::wstring wname;
 	int hp, maxHp = 5;
 	int level;
 	int exp;
@@ -59,19 +60,9 @@ public:
 	int GetLevel() override { return level; }
 	int GetExp() override { return exp; }
 	int GetDamage() override { return damage; }
-	void SetExp(int exp) override {
-		auto level = GetLevel();
-		auto levelMinusOne = GetLevel() - 1;
-		auto requireExp = levelMinusOne * 100 + 100;
-		if (requireExp < exp) {
-			SetLevel(GetLevel() + 1);
-			exp -= requireExp;
-		}
-		this->exp = exp;
-		SendStatChange();
-	}
-	void SetLevel(int level) override { this->level = level; }
-	void SetHp(int hp) override { this->hp = hp; }
+	void SetExp(int exp) override;
+	void SetLevel(int level) override;
+	void SetHp(int hp) override;
 
 private:
 	/// <summary>
@@ -79,5 +70,7 @@ private:
 	/// </summary>
 	/// <param name="id"></param>
 	void ProcessPacket(unsigned char* buf);
+
+	void AddHealTimer();
 };
 

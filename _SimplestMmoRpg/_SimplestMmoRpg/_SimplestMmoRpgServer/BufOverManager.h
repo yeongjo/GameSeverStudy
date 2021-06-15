@@ -21,6 +21,7 @@ private:
 	std::mutex sendingDataQueueLock;
 	Session* session;
 	Player* player;
+	int remainBufSize;
 	int id;
 	
 	static size_t EX_OVER_SIZE_INCREMENT;
@@ -65,4 +66,6 @@ private:
 	std::vector<unsigned char>* GetSendingDataQueue();
 
 	void RecycleSendingDataQueue(std::vector<unsigned char>* recycleQueue);
+
+	void AddSendTimer();
 };

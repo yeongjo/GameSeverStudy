@@ -4,6 +4,7 @@
 
 #include "Sector.h"
 #include "SocketUtil.h"
+#include "StringUtil.h"
 
 Player* Player::Create(int id) {
 	return new Player(id);
@@ -35,6 +36,12 @@ void Player::Init() {
 	level = 1;
 	exp = 0;
 	damage = 1;
+	wname = s2ws(name);
+	int tx = x;
+	int ty = y;
+	DB::LoginQuery(wname, wname, hp, level, exp, tx, ty);
+	x = tx;
+	y = ty;
 }
 
 void Player::Disconnect() {
@@ -168,6 +175,7 @@ MiniOver* Player::GetOver() {
 Player::Player(int id) : Actor(id), session(this) {
 	actors[id] = this;
 	session.state = PLST_FREE;
+	session.recvOver.packetBuf.resize(MAX_BUFFER);
 	session.recvOver.callback = [this](int bufSize) {
 		auto exOver = session.recvOver;
 		unsigned char* recvPacketPtr;
@@ -177,14 +185,14 @@ Player::Player(int id) : Actor(id), session(this) {
 			const unsigned char prevPacketSize = session.recvedBuf[0];
 			const unsigned char splitBufSize = prevPacketSize - session.recvedBufSize;
 			session.recvedBuf.resize(prevPacketSize);
-			memcpy(1 + &session.recvedBuf.back(), exOver.packetBuf, splitBufSize);
+			memcpy(1 + &session.recvedBuf.back(), &exOver.packetBuf[0], splitBufSize);
 			recvPacketPtr = &session.recvedBuf[0];
 			ProcessPacket(recvPacketPtr);
-			recvPacketPtr = exOver.packetBuf + splitBufSize;
+			recvPacketPtr = &exOver.packetBuf[0] + splitBufSize;
 			totalRecvBufSize -= splitBufSize;
 		}
 		else{
-			recvPacketPtr = exOver.packetBuf;
+			recvPacketPtr = &exOver.packetBuf[0];
 		}
 
 		for (unsigned char recvPacketSize = recvPacketPtr[0];
@@ -218,9 +226,9 @@ void Player::SetPos(int x, int y) {
 
 	SendMove(id);
 
-	SECTOR::Move(id, prevX, prevY, x, y);
+	Sector::Move(id, prevX, prevY, x, y);
 
-	auto&& new_vl = SECTOR::GetIdFromOverlappedSector(id);
+	auto&& new_vl = Sector::GetIdFromOverlappedSector(id);
 
 	std::lock_guard<std::mutex> lock(oldNewViewListLock);
 	CopyViewSetToOldViewList();
@@ -255,6 +263,7 @@ void Player::SetPos(int x, int y) {
 }
 
 void Player::SendStatChange() {
+	DB::UpdateStat(wname, hp, level, exp, x, y);
 	SendChangedStat(id, hp, level, exp);
 	Actor::SendStatChange();
 }
@@ -266,9 +275,28 @@ bool Player::TakeDamage(int attackerId) {
 		SendStatChange();
 		return true;
 	}
+	if(hp == maxHp - 1){
+		AddHealTimer();
+	}
 	SendStatChange();
 	return false;
 }
+
+void Player::SetExp(int exp) {
+	auto level = GetLevel();
+	auto levelMinusOne = level - 1;
+	auto requireExp = levelMinusOne * 100 + 100;
+	if (requireExp < exp){
+		SetLevel(level + 1);
+		exp -= requireExp;
+	}
+	this->exp = exp;
+	SendStatChange();
+}
+
+void Player::SetLevel(int level) { this->level = level; }
+
+void Player::SetHp(int hp) { this->hp = hp; }
 
 void Player::ProcessPacket(unsigned char* buf) {
 	switch (buf[1]) {
@@ -280,6 +308,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 			std::lock_guard<std::mutex> lock{ session.socketLock };
 			strcpy_s(name, packet->player_id);
 
+			//TRUNCATE TABLE user_data로 db 행 다날릴수있음
 			x = rand() % WORLD_WIDTH;
 			y = rand() % WORLD_HEIGHT;
 #ifdef PLAYER_NOT_RANDOM_SPAWN
@@ -292,7 +321,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 		InitSector();
 		SendLoginOk();
 
-		auto& selected_sector = SECTOR::GetIdFromOverlappedSector(id);
+		auto& selected_sector = Sector::GetIdFromOverlappedSector(id);
 
 		viewSetLock.lock();
 		for (auto otherId : selected_sector) {
@@ -300,7 +329,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 		}
 		viewSetLock.unlock();
 		for (auto otherId : selected_sector) {
-			auto other = Get(otherId);
+			auto other = Actor::Get(otherId);
 			other->AddToViewSet(id);
 			SendAddActor(otherId);
 			if (!other->IsNpc()) {
@@ -338,6 +367,18 @@ void Player::ProcessPacket(unsigned char* buf) {
 	}
 }
 
+void Player::AddHealTimer() {
+	TimerQueueManager::Add(id, 5000, []() {return true; }, [this](int) {
+		if(GetHp() < maxHp){
+			SetHp(GetHp() + 1);
+			SendStatChange();
+			if (GetHp() < maxHp) {
+				AddHealTimer();
+			}
+		}
+	});
+}
+
 void Player::SendRemoveActor(int removeTargetId) {
 	sc_packet_remove_object p;
 	p.id = removeTargetId;
@@ -349,7 +390,7 @@ void Player::SendRemoveActor(int removeTargetId) {
 void Player::CallRecv() {
 	auto& recvOver = session.recvOver;
 	recvOver.wsabuf[0].buf =
-		reinterpret_cast<char*>(recvOver.packetBuf);
+		reinterpret_cast<char*>(&recvOver.packetBuf[0]);
 	recvOver.wsabuf[0].len = MAX_BUFFER;
 	memset(&recvOver.over, 0, sizeof(recvOver.over));
 	DWORD r_flag = 0;
@@ -357,6 +398,6 @@ void Player::CallRecv() {
 	if (0 != ret) {
 		int err_no = WSAGetLastError();
 		if (WSA_IO_PENDING != err_no)
-			display_error("WSARecv : ", WSAGetLastError());
+			PrintSocketError("WSARecv : ", WSAGetLastError());
 	}
 }

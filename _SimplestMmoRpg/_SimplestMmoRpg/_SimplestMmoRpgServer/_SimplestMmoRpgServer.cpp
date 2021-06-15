@@ -51,7 +51,7 @@
 #include "LuaUtil.h"
 //#define PLAYERLOG
 //#define NPCLOG
-#define PLAYER_NOT_RANDOM_SPAWN
+//#define PLAYER_NOT_RANDOM_SPAWN
 #include "Npc.h"
 #include "PathFindHelper.h"
 #include "Player.h"
@@ -85,8 +85,6 @@ using namespace std;
 constexpr int MONSTER_AGRO_RANGE = 3; // 몬스터가 어그로 끌리는 범위
 constexpr int SERVER_ID = 0;
 
-mutex coutMutex;
-DB* db;
 HANDLE hIocp;
 
 std::string random_string(std::size_t length) {
@@ -116,7 +114,7 @@ void Worker(HANDLE hIocp) {
 
 		int key = static_cast<int>(recvKey);
 		if (FALSE == ret) {
-			display_error("GQCS : ", WSAGetLastError());
+			PrintSocketError("GQCS : ", WSAGetLastError());
 			if (SERVER_ID == key) {
 				cout << "서버키가 Key로 넘어옴" << endl;
 				exit(-1);
@@ -143,13 +141,18 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 	if (FALSE == ret) {
 		const int err_num = WSAGetLastError();
 		if (err_num != WSA_IO_PENDING)
-			display_error("AcceptEx Error", err_num);
+			PrintSocketError("AcceptEx Error", err_num);
 	}
 }
 
 int main() {
 	wcout.imbue(locale("korean"));
-	//db = new DB();
+	for (size_t i = 0; i < 5; i++) {
+		if (DB::Create()) {
+			break;
+		}
+		cout << "DB 연결 실패로 다시 시도: "<< i+1<<"회\n";
+	}
 	
 	WorldManager::Get()->Generate();
 	WorldManager::Get()->Load();

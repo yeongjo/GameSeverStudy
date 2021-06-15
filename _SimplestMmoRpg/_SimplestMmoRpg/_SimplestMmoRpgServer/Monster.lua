@@ -71,6 +71,17 @@ function RandomMove()
 end
 
 function Tick(actorIdArray)
+	if(mTargetActorId ~= -1) then
+		playerX = LuaGetX(mTargetActorId)
+		playerY = LuaGetY(mTargetActorId)
+
+		if(playerX == mX) then
+			if(playerY == mY) then
+				LuaTakeDamage(mTargetActorId, mId)
+			end
+		end
+	end
+
 	if(mFindPlayerAct == EFindPlayerAct_Peace) then
 		if(mTargetActorId ~= -1) then
 			targetActorX = LuaGetX(mTargetActorId)
@@ -78,9 +89,9 @@ function Tick(actorIdArray)
 			--LuaPrint(mTargetActorId..": "..targetActorX..","..targetActorY.."\n")
 		else
 			if(ESoloMove_Roaming == mSoloMove) then
-				LuaPrint("RandomMove:"..mId..": "..mX..","..mY.."\n")
+				--LuaPrint("RandomMove:"..mId..": "..mX..","..mY.."\n")
 				RandomMove()
-				LuaPrint("after RandomMove:"..mId..": "..mX..","..mY.."\n")
+				--LuaPrint("after RandomMove:"..mId..": "..mX..","..mY.."\n")
 			end
 			return
 		end
@@ -120,7 +131,7 @@ function Tick(actorIdArray)
 		mPathTargetY = targetActorY
 		LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
 	end
-	LuaPrint("x: "..mX.." y:"..mY.." mPathTargetX: "..mPathTargetX.." mPathTargetY:"..mPathTargetY.."\n")
+	--LuaPrint("x: "..mX.." y:"..mY.." mPathTargetX: "..mPathTargetX.." mPathTargetY:"..mPathTargetY.."\n")
 	if(mX == mPathTargetX and mY == mPathTargetY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
 		mPathTargetX = LuaGetX(mTargetActorId)
 		targetActorX = mPathTargetX
@@ -148,14 +159,7 @@ function OnNearActorWithPlayerMove(playerId)
 end
 
 function OnNearActorWithSelfMove(playerId)
-	playerX = LuaGetX(playerId)
-	playerY = LuaGetY(playerId)
-
-	if(playerX == mX) then
-		if(playerY == mY) then
-			LuaTakeDamage(playerId, mId)
-		end
-	end
+	
 end
 
 function TakeDamage(playerId, damage)

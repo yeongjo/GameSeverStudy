@@ -20,13 +20,16 @@ struct AcceptOver : public MiniOver {
 };
 struct BufOver : public MiniOver {
 	WSABUF			wsabuf[1];
-	unsigned char	packetBuf[MAX_BUFFER];
+	std::vector<unsigned char>	packetBuf;
 private:
 	BufOverManager* manager;
 public:
-	BufOver() {}
-	BufOver(BufOverManager* manager) : manager(manager) {}
+	BufOver() {
+	}
+	BufOver(BufOverManager* manager) :  manager(manager) {
+	}
 	void InitOver() {
+		packetBuf.resize(MAX_BUFFER);
 		memset(&over, 0, sizeof(over));
 	}
 

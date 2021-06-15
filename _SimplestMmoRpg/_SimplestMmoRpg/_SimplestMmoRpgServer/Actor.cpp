@@ -20,11 +20,11 @@ void Actor::Init() {
 }
 
 void Actor::InitSector() const {
-	SECTOR::GetSector(x, y)->Add(id);
+	Sector::GetSector(x, y)->Add(id);
 }
 
 void Actor::RemoveFromSector() const {
-	SECTOR::GetSector(x, y)->Remove(id);
+	Sector::GetSector(x, y)->Remove(id);
 }
 
 void Actor::Update() {

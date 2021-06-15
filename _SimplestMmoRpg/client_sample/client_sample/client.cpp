@@ -274,7 +274,7 @@ void client_initialize() {
 	mapTexture->loadFromFile(MAP_PATH);
 	mapImage = mapTexture->copyToImage();
 	mapSize = mapImage.getSize();
-	textField = new sf::TextField(MAX_STR_LEN);
+	textField = new sf::TextField(MAX_STR_LEN-1);
 	textField->setPosition(0, 40);
 	white_tile = OBJECT{ *board, 5, 5, TILE_WIDTH, TILE_WIDTH };
 	black_tile = OBJECT{ *board, 69, 5, TILE_WIDTH, TILE_WIDTH };
@@ -542,6 +542,8 @@ bool Player::attack() {
 	return false;
 }
 
+bool isLogin = false;
+
 int main() {
 	wcout.imbue(locale("korean"));
 	sf::Socket::Status status = socket.connect("127.0.0.1", SERVER_PORT);
@@ -555,13 +557,6 @@ int main() {
 	}
 
 	client_initialize();
-	string name{ "PL" };
-	int tt = chrono::duration_cast<chrono::milliseconds>
-		(chrono::system_clock::now().
-			time_since_epoch()).count();
-	name += to_string(tt % 1000);
-	send_login_packet(name);
-	avatar.set_name(name.c_str());
 	sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "2D CLIENT");
 	g_window = &window;
 
@@ -590,7 +585,16 @@ int main() {
 					break;
 				}
 				case sf::Keyboard::Enter: {
-					send_chat_packet(textField->getText());
+					if(!isLogin){
+						auto name = textField->getText();
+						name = name.substr(0, min(static_cast<int>(name.size()), MAX_ID_LEN-1));
+						send_login_packet(name);
+						avatar.set_name(name.c_str());
+						isLogin = true;
+					}else{
+						send_chat_packet(textField->getText());
+					}
+					
 					textField->clear();
 					break;
 				}

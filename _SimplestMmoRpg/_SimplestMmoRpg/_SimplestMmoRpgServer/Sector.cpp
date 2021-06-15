@@ -2,19 +2,19 @@
 
 #include "Actor.h"
 
-std::array <std::array <SECTOR, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> SECTOR::world_sector;
+std::array <std::array <Sector, WORLD_SECTOR_X_COUNT>, WORLD_SECTOR_Y_COUNT> Sector::world_sector;
 
-void SECTOR::Add(int actorId) {
+void Sector::Add(int actorId) {
 	std::lock_guard<std::mutex> lock(sectorLock);
 	sector.insert(actorId);
 }
 
-void SECTOR::Remove(int actorId) {
+void Sector::Remove(int actorId) {
 	std::lock_guard<std::mutex> lock(sectorLock);
 	sector.erase(actorId);
 }
 
-void SECTOR::Move(int actorId, int prevX, int prevY, int x, int y) {
+void Sector::Move(int actorId, int prevX, int prevY, int x, int y) {
 	if (y != prevY || x != prevX){
 		// 원래 섹터랑 다르면 다른 섹터로 이동한 것임
 		GetSector(prevX, prevY)->Remove(actorId);
@@ -22,7 +22,7 @@ void SECTOR::Move(int actorId, int prevX, int prevY, int x, int y) {
 	}
 }
 
-void SECTOR::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>& returnSector) {
+void Sector::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>& returnSector) {
 	auto actor = Actor::Get(id);
 	auto isNpc = actor->IsNpc();
 	std::lock_guard<std::mutex> lock(world_sector[y][x].sectorLock);
@@ -40,7 +40,7 @@ void SECTOR::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>
 	}
 }
 
-std::vector<int>& SECTOR::GetIdFromOverlappedSector(int playerId) {
+std::vector<int>& Sector::GetIdFromOverlappedSector(int playerId) {
 	auto actor = Actor::Get(playerId);
 	auto amINpc = actor->IsNpc();
 	const int y = actor->GetY();
@@ -99,6 +99,6 @@ std::vector<int>& SECTOR::GetIdFromOverlappedSector(int playerId) {
 	return returnSector;
 }
 
-SECTOR* SECTOR::GetSector(int x, int y) {
+Sector* Sector::GetSector(int x, int y) {
 	return &world_sector[y/WORLD_SECTOR_SIZE][x / WORLD_SECTOR_SIZE];
 }

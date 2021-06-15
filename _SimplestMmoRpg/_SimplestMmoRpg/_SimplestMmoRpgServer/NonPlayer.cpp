@@ -263,7 +263,7 @@ void NonPlayer::WakeUpNpc() {
 	if (actor->IsActive() == false){
 		bool old_state = false;
 		if (true == atomic_compare_exchange_strong(&actor->IsActive(), &old_state, true)){
-			std::cout << "wake up id: " << id << " is active: " << actor->IsActive() << std::endl;
+			//std::cout << "wake up id: " << id << " is active: " << actor->IsActive() << std::endl;
 			AddNpcLoopEvent();
 		}
 	}
@@ -298,9 +298,9 @@ void NonPlayer::SetPos(int x, int y) {
 		lua_setglobal(L, "mY");
 	}
 
-	SECTOR::Move(id, prevX, prevY, x, y);
+	Sector::Move(id, prevX, prevY, x, y);
 
-	newViewList = SECTOR::GetIdFromOverlappedSector(id);
+	newViewList = Sector::GetIdFromOverlappedSector(id);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{ coutMutex };
 	cout << "npc[" << id << "] (" << x << "," << y << ") ÀÌµ¿ " << oldViewList.size() << "¸í[";

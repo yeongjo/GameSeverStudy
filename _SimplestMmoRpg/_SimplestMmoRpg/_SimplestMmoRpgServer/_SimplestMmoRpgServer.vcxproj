@@ -221,6 +221,7 @@
     <ClInclude Include="Session.h" />
     <ClInclude Include="SocketUtil.h" />
     <ClInclude Include="StrcutPool.h" />
+    <ClInclude Include="StringUtil.h" />
     <ClInclude Include="TimerQueueManager.h" />
     <ClInclude Include="WorldManager.h" />
   </ItemGroup>

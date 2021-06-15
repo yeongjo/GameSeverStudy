@@ -34,6 +34,8 @@ constexpr bool TimerEvent::operator==(const TimerEvent& L) const {
 }
 
 class TimerQueue : public removable_priority_queue<TimerEvent> {
+	std::mutex timerLock;
+	std::atomic_int size;
 public:
 	// TODO Add할때 id 리턴받고 그거 바탕으로 지워야할듯 근데 당장은 쓸일없음
 	//bool remove(const int playerId, const EEventType eventType) {
@@ -50,25 +52,47 @@ public:
 	//	return false;
 	//}
 	void remove_all(const int playerId);
+	std::mutex& GetMutex() {
+		return timerLock;
+	}
+	bool empty() {
+		return size == 0;
+	}
+	void push(const TimerEvent& event) {
+		++size;
+		removable_priority_queue<TimerEvent>::push(event);
+	}
+	void push(TimerEvent&& event) {
+		++size;
+		removable_priority_queue<TimerEvent>::push(event);
+	}
+	void pop() {
+		--size;
+		removable_priority_queue<TimerEvent>::pop();
+	}
 };
+
+constexpr int TIMER_QUEUE_COUNT = 256;
 
 class TimerQueueManager {
 	/// <summary>
 	/// timerLock으로 잠궈주고 사용
 	/// </summary>
-	static TimerQueue timerQueue;
-	static std::mutex timerLock;
+	static std::array<TimerQueue, TIMER_QUEUE_COUNT> timerQueues;
+	static std::atomic_int timerQueueIdx;
 	static HANDLE hIocp;
 
 public:
-	static void Add(TimerEvent event);
+	static void Add(TimerEvent& event);
 
 	static void RemoveAll(int playerId);
 
-	static void Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback,
-	                const char* buffer = 0, int targetId = 0);
+	static void Add(int obj, int delayMs, TimerEventCheckCondition checkCondition, iocpCallback callback);
 
 	static void Do();
 
 	static void SetIocpHandle(HANDLE hIocp);
+
+private:
+	static void NextIndex();
 };

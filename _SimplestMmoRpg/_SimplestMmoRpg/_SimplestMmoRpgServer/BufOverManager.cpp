@@ -24,18 +24,19 @@ BufOverManager::~BufOverManager() {
 }
 
 bool BufOverManager::HasSendData() {
-	std::lock_guard<std::mutex> lock(sendingDataLock);
-	return !sendingData.empty();
+	return remainBufSize;
+	//std::lock_guard<std::mutex> lock(sendingDataLock);
+	//return !sendingData.empty();
 }
 
 void BufOverManager::AddSendingData(void* p) {
-	TimerQueueManager::Add(id, 12, [&]() {
-		return HasSendData();
-		}, [this](int size) {
-			SendAddedData();
-		});
 	const auto packetSize = static_cast<size_t>(static_cast<unsigned char*>(p)[0]);
+	//std::cout << "AddSendingData: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
 	std::lock_guard<std::mutex> lock(sendingDataLock);
+	if (remainBufSize == 0) {
+		AddSendTimer();
+	}
+	remainBufSize += packetSize;
 	const auto prevSize = sendingData.size();
 	const auto totalSendPacketSize = prevSize + packetSize;
 	sendingData.resize(totalSendPacketSize);
@@ -45,15 +46,16 @@ void BufOverManager::AddSendingData(void* p) {
 void BufOverManager::ClearSendingData() {
 	std::lock_guard<std::mutex> lock(sendingDataLock);
 	sendingData.clear();
+	remainBufSize = 0;
 }
 
 BufOver* BufOverManager::Get() {
 	BufOver* result;
 	managedExOversLock.lock();
 	size_t size = managedExOvers.size();
-	if (size == 0){
+	if (size == 0) {
 		managedExOvers.resize(size + EX_OVER_SIZE_INCREMENT);
-		for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i){
+		for (size_t i = size; i < size + EX_OVER_SIZE_INCREMENT; ++i) {
 			managedExOvers[i] = new BufOver(this);
 			managedExOvers[i]->InitOver();
 		}
@@ -76,9 +78,9 @@ void BufOverManager::Recycle(BufOver* usableGroup) {
 }
 
 std::vector<unsigned char>* BufOverManager::GetSendingDataQueue() {
-	std::lock_guard<std::mutex> lock(sendingDataQueueLock);
+	std::lock_guard<std::mutex> lock(sendingDataQueueLock); //TODO 앞뒤 리스트 방식으로 바꾸기
 	auto size = sendingDataQueue.size();
-	if (0 < size){
+	if (0 < size) {
 		const auto result = sendingDataQueue[size - 1];
 		sendingDataQueue.pop_back();
 		return result;
@@ -91,6 +93,18 @@ void BufOverManager::RecycleSendingDataQueue(std::vector<unsigned char>* recycle
 	sendingDataQueue.push_back(recycleQueue);
 }
 
+void BufOverManager::AddSendTimer() {
+	TimerQueueManager::Add(id, 32, [&]() {
+		                       return HasSendData();
+	                       }, [this](int size) {
+		                       SendAddedData();
+	                       });
+}
+
+void EmptyFunction(int size) {
+
+}
+
 void BufOverManager::SendAddedData() {
 	sendingDataLock.lock();
 	auto totalSendDataSize = sendingData.size();
@@ -98,31 +112,40 @@ void BufOverManager::SendAddedData() {
 		sendingDataLock.unlock();
 		return;
 	}
+	//std::cout << "Send!!!!: " << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
+
+	remainBufSize -= totalSendDataSize;
+	if (remainBufSize > 0) {
+		AddSendTimer();
+	}
 
 	auto& copiedSendingData = *GetSendingDataQueue();
 	copiedSendingData.resize(totalSendDataSize);
 	memcpy(&copiedSendingData[0], &sendingData[0], totalSendDataSize);
 	sendingData.clear();
 	sendingDataLock.unlock();
-	
+
 	auto sendDataBegin = &copiedSendingData[0];
 
 	while (0 < totalSendDataSize) {
-		auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
+		const auto sendDataSize = static_cast<int>(totalSendDataSize);
+		//auto sendDataSize = min(MAX_BUFFER, (int)totalSendDataSize);
 		auto exOver = Get();
-		exOver->callback = [](int size) {};
-		memcpy(exOver->packetBuf, sendDataBegin, sendDataSize);
-		exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(exOver->packetBuf);
+		exOver->callback = EmptyFunction;
+		exOver->packetBuf.resize(sendDataSize);
+		memcpy(&exOver->packetBuf[0], sendDataBegin, sendDataSize);
+		exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(&exOver->packetBuf[0]);
 		exOver->wsabuf[0].len = sendDataSize;
 		int ret;
 		{
 			std::lock_guard <std::mutex> lock{ session->socketLock };
 			ret = WSASend(session->socket, exOver->wsabuf, 1, NULL, 0, &exOver->over, NULL);// TODO GetQueuedCompletionStatus에서 얼마 보냈는지 확인해서 안갔으면 더 보내기
+			//std::cout << "totalSendDataSize["<<id<<"]: "<<totalSendDataSize << std::endl;
 		}
 		if (0 != ret) {
 			auto err = WSAGetLastError();
 			if (WSA_IO_PENDING != err) {
-				display_error("WSASend : ", WSAGetLastError());
+				PrintSocketError("WSASend : ", WSAGetLastError());
 				player->Disconnect();
 				return;
 			}
