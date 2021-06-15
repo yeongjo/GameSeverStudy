@@ -4,6 +4,7 @@
 #include "Monster.h"
 #include "Player.h"
 #include "Sector.h"
+//#pragma comment(lib, "lua54.lib")
 
 int LuaAddEventSendMess(lua_State* L) {
 	int recverId = lua_tointeger(L, -4);

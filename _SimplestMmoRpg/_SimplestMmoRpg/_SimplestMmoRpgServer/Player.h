@@ -23,6 +23,7 @@ public:
 	void Init() override;
 
 	void SetPos(int x, int y) override;
+	
 	void SendStatChange() override;
 
 	virtual void Disconnect();

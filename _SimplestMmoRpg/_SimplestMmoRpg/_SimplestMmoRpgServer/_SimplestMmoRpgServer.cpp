@@ -51,6 +51,7 @@
 #include "LuaUtil.h"
 //#define PLAYERLOG
 //#define NPCLOG
+#define PLAYER_NOT_RANDOM_SPAWN
 #include "Npc.h"
 #include "PathFindHelper.h"
 #include "Player.h"
@@ -64,10 +65,23 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "MSWSock.lib")
 
+#include "Actor.cpp"
+#include "BufOverManager.cpp"
+#include "Image.cpp"
+#include "LuaUtil.cpp"
+#include "Monster.cpp"
+#include "NonPlayer.cpp"
+#include "Npc.cpp"
+#include "OverlappedStruct.cpp"
+#include "PathFindHelper.cpp"
+#include "Player.cpp"
+#include "Sector.cpp"
+#include "TimerQueueManager.cpp"
+#include "WorldManager.cpp"
+#include "Db.cpp"
+
 using namespace std;
 
-#define PLAYER_NOT_RANDOM_SPAWN
-#define BATCH_SEND_BYTES 1024 // TODO ExOver에 보낼수있는 데이터사이즈가 256이라 사용할수없음
 constexpr int MONSTER_AGRO_RANGE = 3; // 몬스터가 어그로 끌리는 범위
 constexpr int SERVER_ID = 0;
 
@@ -135,16 +149,16 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 
 int main() {
 	wcout.imbue(locale("korean"));
-	db = new DB();
+	//db = new DB();
 	
 	WorldManager::Get()->Generate();
 	WorldManager::Get()->Load();
 	for (int i = SERVER_ID + 1; i <= MAX_PLAYER; ++i) {
-		Player::Get(i);
+		Player::Create(i);
 	}
 	for (int i = MAX_PLAYER + 1; i <= MAX_USER; i++) {
 		if(i < MONSTER_ID_START){
-			Npc::Get(i)->Init();
+			Npc::Create(i)->Init();
 		}else{
 			WorldManager::Get()->GetMonster(i);
 		}

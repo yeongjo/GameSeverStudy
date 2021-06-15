@@ -2,7 +2,7 @@
 
 #include "LuaUtil.h"
 #include "PathFindHelper.h"
-
+#pragma comment(lib, "lua54.lib")
 Monster::Monster(int id): NonPlayer(id) {
 	pathFindHelper = PathFindHelper::Get(WorldManager::Get());
 }
@@ -13,7 +13,7 @@ Monster* Monster::Create(int id) {
 
 Monster* Monster::Get(int id) {
 	_ASSERT(MONSTER_ID_START <= id && id < MONSTER_ID_START + MAX_MONSTER);
-	return reinterpret_cast<Monster*>(Get(id));
+	return reinterpret_cast<Monster*>(Actor::Get(id));
 }
 
 void Monster::Init() {
@@ -92,7 +92,7 @@ void Monster::Update() {
 		CallLuaFunction(L, 1, 0);
 	}
 
-	PathFindHelper::FindStatus findWay;
+	PathFindHelper::FindStatus findWay = PathFindHelper::FindStatus::CantFindWay;
 	for (size_t i = 0; i < VIEW_RADIUS; i++) {
 		//for (size_t i = 0; i < 100; i++) {
 		findWay = pathFindHelper->FindWayOnce();

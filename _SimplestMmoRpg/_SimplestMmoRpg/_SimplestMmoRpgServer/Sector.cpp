@@ -15,22 +15,18 @@ void SECTOR::Remove(int actorId) {
 }
 
 void SECTOR::Move(int actorId, int prevX, int prevY, int x, int y) {
-	const auto sectorViewFrustumX = prevX / WORLD_SECTOR_SIZE;
-	const auto sectorViewFrustumY = prevY / WORLD_SECTOR_SIZE;
-	const auto newSectorViewFrustumX = x / WORLD_SECTOR_SIZE;
-	const auto newSectorViewFrustumY = y / WORLD_SECTOR_SIZE;
 	if (y != prevY || x != prevX){
 		// 원래 섹터랑 다르면 다른 섹터로 이동한 것임
-		GetSector(sectorViewFrustumY, sectorViewFrustumX)->Remove(actorId);
-		GetSector(newSectorViewFrustumY, newSectorViewFrustumX)->Add(actorId);
+		GetSector(prevX, prevY)->Remove(actorId);
+		GetSector(x, y)->Add(actorId);
 	}
 }
 
-auto SECTOR::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>& returnSector) -> void {
-	std::lock_guard<std::mutex> lock(world_sector[y][x].sectorLock);
-	auto& otherSet = world_sector[y][x].sector;
+void SECTOR::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>& returnSector) {
 	auto actor = Actor::Get(id);
 	auto isNpc = actor->IsNpc();
+	std::lock_guard<std::mutex> lock(world_sector[y][x].sectorLock);
+	auto& otherSet = world_sector[y][x].sector;
 	for (auto otherId : otherSet){
 		auto otherActor = Actor::Get(otherId);
 		auto otherIsNpc = otherActor->IsNpc();
@@ -54,6 +50,7 @@ std::vector<int>& SECTOR::GetIdFromOverlappedSector(int playerId) {
 	auto& mainSector = world_sector[sectorY][sectorX];
 
 	auto& returnSector = actor->GetSelectedSector();
+	mainSector.sectorLock.lock();
 	for (auto otherId : mainSector.sector){
 		const auto otherActor = Actor::Get(otherId);
 		if ((amINpc && otherActor->IsNpc()) ||
@@ -103,5 +100,5 @@ std::vector<int>& SECTOR::GetIdFromOverlappedSector(int playerId) {
 }
 
 SECTOR* SECTOR::GetSector(int x, int y) {
-	return &world_sector[y][x];
+	return &world_sector[y/WORLD_SECTOR_SIZE][x / WORLD_SECTOR_SIZE];
 }

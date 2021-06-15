@@ -128,7 +128,7 @@ void Player::SendMove(int p_id) {
 	p.id = p_id;
 	p.size = sizeof(p);
 	p.type = SC_POSITION;
-	auto actor = Get(p_id);
+	auto actor = Actor::Get(p_id);
 	p.x = actor->GetX();
 	p.y = actor->GetY();
 	p.move_time = actor->GetMoveTime();
@@ -140,7 +140,7 @@ void Player::SendAddActor(int addedId) {
 	p.id = addedId;
 	p.size = sizeof(p);
 	p.type = SC_ADD_OBJECT;
-	auto actor = Get(addedId);
+	auto actor = Actor::Get(addedId);
 	p.x = actor->GetX();
 	p.y = actor->GetY();
 	p.obj_class = 1;
@@ -229,7 +229,7 @@ void Player::SetPos(int x, int y) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			//1. 새로 시야에 들어오는 플레이어
 			AddToViewSet(otherId);
-			Get(otherId)->AddToViewSet(id);
+			Actor::Get(otherId)->AddToViewSet(id);
 		} else {
 			//2. 기존 시야에도 있고 새 시야에도 있는 경우
 			if (!Actor::Get(otherId)->IsNpc()) {
@@ -241,7 +241,7 @@ void Player::SetPos(int x, int y) {
 					cout << "플레이어[" << id << "]이 " << actor->x << "," << actor->y << " 움직여서 npc[" << pl << "]가 갱신" << endl;
 				}
 #endif
-				Get(otherId)->OnNearActorWithPlayerMove(id);
+				Actor::Get(otherId)->OnNearActorWithPlayerMove(id);
 			}
 		}
 	}
@@ -249,7 +249,7 @@ void Player::SetPos(int x, int y) {
 		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), otherId)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
 			RemoveFromViewSet(otherId);
-			Get(otherId)->RemoveFromViewSet(id);
+			Actor::Get(otherId)->RemoveFromViewSet(id);
 		}
 	}
 }
@@ -311,8 +311,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 	}
 	case CS_MOVE: {
 		auto packet = reinterpret_cast<cs_packet_move*>(buf);
-		auto actor = Get(id);
-		actor->SetMoveTime(packet->move_time);
+		SetMoveTime(packet->move_time);
 		Move(static_cast<DIRECTION>(packet->direction));
 		break;
 	}
@@ -326,7 +325,7 @@ void Player::ProcessPacket(unsigned char* buf) {
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet) {
 			if (!Actor::Get(viewId)->IsNpc()) {
-				Player::Get(viewId)->SendChat(id, packet->message);
+				Get(viewId)->SendChat(id, packet->message);
 			}
 		}
 		break;

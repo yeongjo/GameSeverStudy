@@ -68,7 +68,7 @@ std::string WorldManager::GetPosString(int index) {
 }
 
 Monster* WorldManager::GetMonster(int id) {
-	auto monster = Monster::Get(id);
+	auto monster = Monster::Create(id);
 	auto& fileMonster = monsters[id - MONSTER_ID_START];
 	monster->Init(fileMonster);
 	return monster;
