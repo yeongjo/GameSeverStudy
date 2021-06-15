@@ -149,12 +149,12 @@ void CallAccept(AcceptOver& over, SOCKET listenSocket) {
 
 int main() {
 	wcout.imbue(locale("korean"));
-	//for (size_t i = 0; i < 5; i++) {
-	//	if (DB::Create()) {
-	//		break;
-	//	}
-	//	cout << "DB 연결 실패로 다시 시도: "<< i+1<<"회\n";
-	//}
+	for (size_t i = 0; i < 5; i++) {
+		if (DB::Create()) {
+			break;
+		}
+		cout << "DB 연결 실패로 다시 시도: "<< i+1<<"회\n";
+	}
 	
 	WorldManager::Get()->Generate();
 	WorldManager::Get()->Load();
