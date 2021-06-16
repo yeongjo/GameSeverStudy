@@ -20,29 +20,12 @@ struct AcceptOver : public MiniOver {
 };
 struct BufOverBase : public MiniOver {
 	WSABUF			wsabuf[1];
-private:
-	BufOverManager* manager;
 public:
 	BufOverBase() {
 		InitOver();
 	}
-	BufOverBase(BufOverManager* manager) : manager(manager) {
-		InitOver();
-	}
 	virtual void InitOver() {
 		memset(&over, 0, sizeof(over));
-	}
-
-	void Recycle(int threadIdx) override {}
-
-	friend BufOverManager;
-private:
-	void SetManager(BufOverManager* manager) {
-		this->manager = manager;
-	}
-
-	BufOverManager* GetManager() {
-		return manager;
 	}
 };
 struct BufOver : public BufOverBase {
@@ -53,21 +36,17 @@ private:
 	BufOverManager* manager;
 public:
 	BufOver() : BufOverBase(){ }
-	BufOver(BufOverManager* manager) : BufOverBase(manager) { }
+	BufOver(BufOverManager* manager) : BufOverBase(), manager(manager) { }
 	void InitOver() {
 		BufOverBase::InitOver();
-		packetBuf.resize(SEND_MAX_BUFFER);
 	}
 
 	void Recycle(int threadIdx) override;
-
 	friend BufOverManager;
 private:
-	void SetManager(BufOverManager* manager) {
-		this->manager = manager;
-	}
+	void SetManager(BufOverManager* manager);
 
-	BufOverManager* GetManager() {
+	BufOverManager* GetManager() const {
 		return manager;
 	}
 };

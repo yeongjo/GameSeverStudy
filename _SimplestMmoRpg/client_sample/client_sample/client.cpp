@@ -31,8 +31,8 @@ constexpr auto SCREEN_HEIGHT = 16;
 constexpr auto TILE_WIDTH = 65;
 constexpr auto WINDOW_WIDTH = TILE_WIDTH * SCREEN_WIDTH + 10;   // size of window
 constexpr auto WINDOW_HEIGHT = TILE_WIDTH * SCREEN_WIDTH + 10;
-constexpr auto BUF_SIZE = 256;
 #include "..\..\_SimplestMmoRpg\_SimplestMmoRpgServer\protocol.h"
+constexpr auto BUF_SIZE = RECV_MAX_BUFFER;
 
 int g_left_x;
 int g_top_y;

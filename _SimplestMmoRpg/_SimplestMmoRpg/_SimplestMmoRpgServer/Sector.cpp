@@ -40,7 +40,7 @@ void Sector::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>
 	}
 }
 
-std::vector<int>& Sector::GetIdFromOverlappedSector(int playerId) {
+void Sector::GetViewListFromSector(int playerId, std::vector<int>& newViewList) {
 	auto actor = Actor::Get(playerId);
 	auto amINpc = actor->IsNpc();
 	const int y = actor->GetY();
@@ -48,8 +48,7 @@ std::vector<int>& Sector::GetIdFromOverlappedSector(int playerId) {
 	const auto sectorY = y / WORLD_SECTOR_SIZE;
 	const auto sectorX = x / WORLD_SECTOR_SIZE;
 	auto& mainSector = world_sector[sectorY][sectorX];
-
-	auto& returnSector = actor->GetSelectedSector();
+	
 	mainSector.sectorLock.lock();
 	for (auto otherId : mainSector.sector){
 		const auto otherActor = Actor::Get(otherId);
@@ -58,7 +57,7 @@ std::vector<int>& Sector::GetIdFromOverlappedSector(int playerId) {
 			!actor->CanSee(otherActor)){
 			continue;
 		}
-		returnSector.push_back(otherId);
+		newViewList.push_back(otherId);
 	}
 	mainSector.sectorLock.unlock();
 
@@ -70,33 +69,32 @@ std::vector<int>& Sector::GetIdFromOverlappedSector(int playerId) {
 	const auto isRight = sectorViewFrustumRight != sectorX && sectorX < static_cast<int>(world_sector[sectorViewFrustumTop].
 		size() - 1);
 	if (sectorViewFrustumTop != sectorY && 0 < sectorY){
-		AddSectorPlayersToMainSector(playerId, sectorViewFrustumTop, sectorX, returnSector);
+		AddSectorPlayersToMainSector(playerId, sectorViewFrustumTop, sectorX, newViewList);
 		if (isLeft){
-			AddSectorPlayersToMainSector(playerId, sectorViewFrustumTop, sectorViewFrustumLeft, returnSector);
+			AddSectorPlayersToMainSector(playerId, sectorViewFrustumTop, sectorViewFrustumLeft, newViewList);
 		}
 		else if (isRight){
 			AddSectorPlayersToMainSector(playerId, sectorViewFrustumTop, sectorViewFrustumRight,
-			                             returnSector);
+			                             newViewList);
 		}
 	}
 	else if (sectorViewFrustumBottom != sectorY && sectorY < static_cast<int>(world_sector.size() - 1)){
-		AddSectorPlayersToMainSector(playerId, sectorViewFrustumBottom, sectorX, returnSector);
+		AddSectorPlayersToMainSector(playerId, sectorViewFrustumBottom, sectorX, newViewList);
 		if (isLeft){
 			AddSectorPlayersToMainSector(playerId, sectorViewFrustumBottom, sectorViewFrustumLeft,
-			                             returnSector);
+			                             newViewList);
 		}
 		else if (isRight){
 			AddSectorPlayersToMainSector(playerId, sectorViewFrustumBottom, sectorViewFrustumRight,
-			                             returnSector);
+			                             newViewList);
 		}
 	}
 	if (isLeft){
-		AddSectorPlayersToMainSector(playerId, sectorY, sectorViewFrustumLeft, returnSector);
+		AddSectorPlayersToMainSector(playerId, sectorY, sectorViewFrustumLeft, newViewList);
 	}
 	else if (isRight){
-		AddSectorPlayersToMainSector(playerId, sectorY, sectorViewFrustumRight, returnSector);
+		AddSectorPlayersToMainSector(playerId, sectorY, sectorViewFrustumRight, newViewList);
 	}
-	return returnSector;
 }
 
 Sector* Sector::GetSector(int x, int y) {

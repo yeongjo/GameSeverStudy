@@ -31,7 +31,7 @@ public:
 	/// </summary>
 	/// <param name="playerId"></param>
 	/// <returns></returns>
-	static std::vector<int>& GetIdFromOverlappedSector(int playerId);
+	static void GetViewListFromSector(int playerId, std::vector<int>& newViewList);
 
 	static Sector* GetSector(int x, int y);
 private:

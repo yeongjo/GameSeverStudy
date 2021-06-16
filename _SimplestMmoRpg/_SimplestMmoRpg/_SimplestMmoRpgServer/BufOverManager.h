@@ -10,6 +10,11 @@ struct BufOverManager;
 
 constexpr auto GLOBAL_RECYCLE_REMAIN_COUNT = 30;
 
+struct SendBuffer {
+	std::vector<unsigned char> sendingBuf;
+	std::mutex dataLock;
+};
+
 /// <summary>
 /// Create()으로 BufOver 쓰고
 /// BufOver->Recycle() 호출하면 됨
@@ -20,12 +25,11 @@ private:
 	static std::array<std::list<BufOver*>, THREAD_COUNT> managedExOvers;
 	static std::array<std::mutex, THREAD_COUNT> managedExOversLock;
 	//StructPool<std::vector<unsigned char>> sendingDataQueue;
-	std::vector<unsigned char> sendingData;
-	std::mutex sendingDataLock;
-	std::mutex remainBufLock;
+	std::array<SendBuffer, THREAD_COUNT> sendBufs;
+	std::atomic_int sendBufSize;
+	
 	Session* session;
 	Player* player;
-	int sendingDataSize = 0;
 	int id;
 	int globalRecycleRemainCount = GLOBAL_RECYCLE_REMAIN_COUNT;
 	std::chrono::system_clock::time_point lastSendTime;

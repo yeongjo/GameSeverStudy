@@ -176,22 +176,14 @@ int Actor::GetExp() { return -1; }
 
 int Actor::GetDamage() { return -1; }
 
-std::vector<int>& Actor::GetSelectedSector() {
-	auto& result = selectedSector;
-	std::lock_guard<std::mutex> lock(selectedSectorLock);
-	result.clear();
-	return result;
-}
-
 MiniOver* Actor::GetOver(int threadIdx) { return nullptr; }
 
 Actor* Actor::Get(int id) {
 	return actors[id];
 }
 
-std::vector<int>& Actor::CopyViewSetToOldViewList() {
+void Actor::CopyViewSet(std::vector<int>& viewList) {
 	std::lock_guard<std::mutex> lock2(viewSetLock);
-	oldViewList.resize(viewSet.size());
-	std::copy(viewSet.begin(), viewSet.end(), oldViewList.begin());
-	return oldViewList;
+	viewList.resize(viewSet.size());
+	std::copy(viewSet.begin(), viewSet.end(), viewList.begin());
 }

@@ -168,9 +168,9 @@ int NonPlayer::GetDamage() {
 }
 
 int NonPlayer::GetNearestPlayer() {
-	std::lock_guard<std::mutex> lock(viewSetLock);
 	int nearestId = -1;
 	int minDistance = VIEW_RADIUS + 1000;
+	std::lock_guard<std::mutex> lock(viewSetLock);
 	for(auto viewId : viewSet){
 		auto actor = Actor::Get(viewId);
 		auto actorDistance = Distance(x, y, actor->GetX(), actor->GetY());
@@ -379,7 +379,8 @@ void NonPlayer::SetPos(int x, int y, int threadIdx) {
 	Sector::Move(id, prevX, prevY, x, y);
 
 	std::lock_guard<std::mutex> lock(oldNewViewListLock);
-	newViewList = Sector::GetIdFromOverlappedSector(id);
+	Sector::GetViewListFromSector(id, newViewList);
+	CopyViewSet(oldViewList);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{ coutMutex };
 	cout << "npc[" << id << "] (" << x << "," << y << ") 이동 " << oldViewList.size() << "명[";
@@ -393,7 +394,6 @@ void NonPlayer::SetPos(int x, int y, int threadIdx) {
 	cout << "]한테 보임";
 #endif // NPCLOG
 
-	CopyViewSetToOldViewList();
 	if (newViewList.empty()) {
 		SleepNpc(); // 아무도 보이지 않으므로 취침
 #ifdef NPCLOG

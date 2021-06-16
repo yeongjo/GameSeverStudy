@@ -14,12 +14,6 @@ protected:
 	char name[MAX_NAME];
 	short	x, y, initX, initY;
 	int		moveTime;
-	
-	/// <summary>
-	/// selectedSectorLock으로 잠궈주고 사용
-	/// </summary>
-	std::vector<int> selectedSector;
-	std::mutex   selectedSectorLock;
 
 	/// <summary>
 	/// oldNewViewListLock으로 잠궈주고 사용
@@ -121,12 +115,11 @@ public:
 	virtual int GetLevel();
 	virtual int GetExp();
 	virtual int GetDamage();
-	std::vector<int>& GetSelectedSector();
 	virtual MiniOver* GetOver(int threadIdx);
 
 	static Actor* Get(int id);
 protected:
-	std::vector<int>& CopyViewSetToOldViewList();
+	void CopyViewSet(std::vector<int>& viewList);
 };
 
 inline void Actor::SetMoveTime(int moveTime) { this->moveTime = moveTime; }

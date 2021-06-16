@@ -221,13 +221,12 @@ void Player::SetPos(int x, int y, int threadIdx) {
 	SendMove(id, threadIdx);
 
 	Sector::Move(id, prevX, prevY, x, y);
+	
+	std::lock_guard<std::mutex> lock(oldNewViewListLock);
+	Sector::GetViewListFromSector(id, newViewList);
+	CopyViewSet(oldViewList);
 
-	//std::lock_guard<std::mutex> lock(oldNewViewListLock);
-	auto&& new_vl = Sector::GetIdFromOverlappedSector(id);
-
-	CopyViewSetToOldViewList();
-
-	for (auto otherId : new_vl) {
+	for (auto otherId : newViewList) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {
 			//1. 새로 시야에 들어오는 플레이어
 			AddToViewSet(otherId, threadIdx);
@@ -253,9 +252,9 @@ void Player::SetPos(int x, int y, int threadIdx) {
 		}
 	}
 	for (auto otherId : oldViewList) {
-		if (new_vl.end() == std::find(new_vl.begin(), new_vl.end(), otherId)) {
+		if (newViewList.end() == std::find(newViewList.begin(), newViewList.end(), otherId)) {
 			// 기존 시야에 있었는데 새 시야에 없는 경우
-			RemoveFromViewSetWithoutLock(otherId, threadIdx);
+			RemoveFromViewSet(otherId, threadIdx);
 			Actor::Get(otherId)->RemoveFromViewSet(id, threadIdx);
 		}
 	}
@@ -327,14 +326,15 @@ void Player::ProcessPacket(unsigned char* buf, int threadIdx) {
 		InitSector();
 		SendLoginOk(threadIdx);
 
-		auto& selected_sector = Sector::GetIdFromOverlappedSector(id);
+		std::lock_guard<std::mutex> lock(oldNewViewListLock);
+		Sector::GetViewListFromSector(id, newViewList);
 
 		viewSetLock.lock();
-		for (auto otherId : selected_sector) {
+		for (auto otherId : newViewList) {
 			viewSet.insert(otherId);
 		}
 		viewSetLock.unlock();
-		for (auto otherId : selected_sector) {
+		for (auto otherId : newViewList) {
 			auto other = Actor::Get(otherId);
 			other->AddToViewSet(id, threadIdx);
 			SendAddActor(otherId, threadIdx);

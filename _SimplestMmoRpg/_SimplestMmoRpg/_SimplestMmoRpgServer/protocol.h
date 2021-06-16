@@ -3,8 +3,8 @@
 constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
-//#define QUICKTEST
-#define MEDIUMTEST
+#define QUICKTEST
+//#define MEDIUMTEST
 #if defined(QUICKTEST)
 constexpr int MAX_USER = 30000;
 constexpr int NPC_ID_START = 10000;
