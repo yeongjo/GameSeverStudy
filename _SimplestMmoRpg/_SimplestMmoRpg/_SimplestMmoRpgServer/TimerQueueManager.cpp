@@ -35,13 +35,13 @@ void TimerQueueManager::Add(TimerEvent& event, int threadIdx) {
 	}
 }
 
-void TimerQueueManager::RemoveAll(int playerId) {
-	for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
-		auto& timerQueue = timerQueues[i];
-		std::lock_guard<std::mutex> lock(timerQueue.timerLock);
-		timerQueue.remove_all(playerId);
-	}
-}
+//void TimerQueueManager::RemoveAll(int playerId) {
+//	for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
+//		auto& timerQueue = timerQueues[i];
+//		std::lock_guard<std::mutex> lock(timerQueue.timerLock);
+//		timerQueue.remove_all(playerId);
+//	}
+//}
 
 void TimerQueueManager::Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback) {
 	using namespace std::chrono;
@@ -49,8 +49,10 @@ void TimerQueueManager::Add(int obj, int delayMs, int threadIdx, TimerEventCheck
 	ev.checkCondition = std::move(checkCondition);
 	ev.callback = std::move(callback);
 	ev.object = obj;
-	ev.bufOver = Actor::Get(obj)->GetOver(threadIdx);
+	auto actor = Actor::Get(obj);
+	ev.bufOver = actor->GetOver(threadIdx);
 	ev.startTime = system_clock::now() + milliseconds(delayMs);
+	ev.actorTimerId = actor->GetTimerId();
 	Add(ev, threadIdx);
 }
 
@@ -66,21 +68,22 @@ void TimerQueueManager::Post(int obj, int threadIdx, iocpCallback callback) {
 void TimerQueueManager::Do() {
 	using namespace std::chrono;
 	for (;;) {
+		auto now = system_clock::now();
 		for (size_t i = 0; i < TIMER_QUEUE_COUNT; i++) {
-			auto now = system_clock::now();
-			if(startTime[i] < now){
+			if (startTime[i] < now) {
 				auto& timerQueue = timerQueues[i];
 				timerQueue.timerLock.lock();
 				if (timerQueue.empty() || now < timerQueue.top().startTime) {
 					timerQueue.timerLock.unlock();
+					std::this_thread::sleep_for(2ms);
 					continue;
 				}
 				TimerEvent ev = timerQueue.top();
 				timerQueue.pop();
 				timerQueue.timerLock.unlock();
 				const auto actor = Actor::Get(ev.object);
-				if (!actor->isActive ||
-					(ev.checkCondition != nullptr && !ev.checkCondition())) {
+				if (!actor->isActive||
+					ev.actorTimerId < actor->GetTimerId()) {
 					continue;
 					}
 

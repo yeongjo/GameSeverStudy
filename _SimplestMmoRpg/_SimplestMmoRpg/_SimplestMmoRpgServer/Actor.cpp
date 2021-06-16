@@ -23,6 +23,10 @@ void Actor::InitSector() const {
 	Sector::GetSector(x, y)->Add(id);
 }
 
+void Actor::Respawn() {
+	++timerId;
+}
+
 void Actor::RemoveFromSector() const {
 	Sector::GetSector(x, y)->Remove(id);
 }
@@ -61,7 +65,7 @@ void Actor::Die(int threadIdx) {
 
 void Actor::RemoveFromAll(int threadIdx) {
 	RemoveFromSector();
-	TimerQueueManager::RemoveAll(id);
+	Respawn();
 	viewSetLock.lock();
 	for (auto viewId : viewSet) {
 		auto actor = Actor::Get(viewId);

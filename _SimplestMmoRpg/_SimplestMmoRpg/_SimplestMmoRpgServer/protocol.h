@@ -4,7 +4,7 @@ constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
 #define QUICKTEST
-//#define MEDIUMTEST
+//#define MEDIUMTEST // 워커 4개 최대 8377명  워커 3개 8190명
 #if defined(QUICKTEST)
 constexpr int MAX_USER = 30000;
 constexpr int NPC_ID_START = 10000;
@@ -171,4 +171,5 @@ enum ETile { Empty, Wall };
 constexpr const char* MAP_PATH = "../../map.bmp";
 constexpr size_t THREAD_COUNT = 4;
 constexpr auto INVERSE_THREAD_COUNT = 1.0f/ THREAD_COUNT;
+constexpr auto INVERSE_THREAD_TIME = INVERSE_THREAD_COUNT * std::chrono::milliseconds(10);
 

@@ -32,6 +32,7 @@ void Sector::AddSectorPlayersToMainSector(int id, int y, int x, std::vector<int>
 		auto otherIsNpc = otherActor->IsNpc();
 		if ((isNpc && otherIsNpc) || // p_id가 NPC면 NPC는 필요없다. 사람만 인식한다
 			otherId == id || // 내 id는 몰라도 된다
+			otherActor->IsDead() ||
 			!actor->CanSee(otherActor)){
 			// 안보이는건 필요없다.
 			continue;
@@ -48,12 +49,14 @@ void Sector::GetViewListFromSector(int playerId, std::vector<int>& newViewList) 
 	const auto sectorY = y / WORLD_SECTOR_SIZE;
 	const auto sectorX = x / WORLD_SECTOR_SIZE;
 	auto& mainSector = world_sector[sectorY][sectorX];
-	
+
+	newViewList.clear();
 	mainSector.sectorLock.lock();
 	for (auto otherId : mainSector.sector){
 		const auto otherActor = Actor::Get(otherId);
 		if ((amINpc && otherActor->IsNpc()) ||
 			otherId == playerId ||
+			otherActor->IsDead() || 
 			!actor->CanSee(otherActor)){
 			continue;
 		}

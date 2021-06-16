@@ -56,9 +56,9 @@ void Player::Disconnect(int threadIdx) {
 
 void Player::Attack(int threadIdx) {
 	viewSetLock.lock();
+	attackViewList.clear();
 	int size = viewSet.size();
-	attackViewList.resize(size);
-	std::copy(viewSet.begin(), viewSet.end(), attackViewList.begin());
+	attackViewList.insert(attackViewList.end(), viewSet.begin(), viewSet.end());
 	viewSetLock.unlock();
 	for (auto i = 0; i < size;){
 		auto actor = Actor::Get(attackViewList[i]);
@@ -74,6 +74,7 @@ void Player::Attack(int threadIdx) {
 void Player::Die(int threadIdx) {
 	//Actor::Die();
 	//SendRemoveActor(id, id); // 삭제는 안하고 위치 옮기고 경험치 반 HP 회복해서 시작위치로
+	Respawn();
 	SetPos(initX, initY, threadIdx);
 	hp = maxHp;
 	exp = exp >> 1;

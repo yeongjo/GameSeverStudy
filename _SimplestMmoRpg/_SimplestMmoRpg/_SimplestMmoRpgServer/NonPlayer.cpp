@@ -201,6 +201,7 @@ void NonPlayer::SetHp(int hp) {
 }
 
 void NonPlayer::SendStatChange(int threadIdx) {
+	int hp = GetHpWithoutLock();
 	{
 		std::lock_guard<std::mutex> lock(viewSetLock);
 		for (auto viewId : viewSet){
@@ -208,10 +209,10 @@ void NonPlayer::SendStatChange(int threadIdx) {
 			if (Actor::Get(viewId)->IsNpc()){
 				continue;
 			}
-			Player::Get(viewId)->SendChangedStat(id, GetHpWithoutLock(), GetLevelWithoutLock(), GetExpWithoutLock(), threadIdx);
+			Player::Get(viewId)->SendChangedStat(id, hp, GetLevelWithoutLock(), GetExpWithoutLock(), threadIdx);
 		}
 	}
-	if (GetHpWithoutLock() == 0){
+	if (hp == 0){
 		TimerQueueManager::Post(id, threadIdx, [this](int,int threadIdx2) {
 			Die(threadIdx2);
 		});
@@ -220,13 +221,13 @@ void NonPlayer::SendStatChange(int threadIdx) {
 
 void NonPlayer::AddNpcLoopEvent(int threadIdx) {
 	using namespace std::chrono;
-	TimerQueueManager::Add(id, 1000, threadIdx, nullptr, [&](int, int threadIdx2) {
-		auto now = system_clock::now();
-		if(prevLoopTime + 1000ms <= now){
-			prevLoopTime = now;
-			AddNpcLoopEvent(threadIdx2);
-			Update(threadIdx2);
+	int prevTimerId = timerId;
+	TimerQueueManager::Add(id, 1000, threadIdx, nullptr, [&, prevTimerId](int, int threadIdx2) {
+		if(prevTimerId != this->timerId){
+			return;
 		}
+		AddNpcLoopEvent(threadIdx2);
+		Update(threadIdx2);
 	});
 }
 
@@ -321,7 +322,10 @@ void NonPlayer::AddToViewSet(int otherId, int threadIdx) {
 void NonPlayer::Die(int threadIdx) {
 	isDead = true;
 	Actor::Die(threadIdx);
-	SleepNpc();
+	SleepNpc(threadIdx);
+	TimerQueueManager::Add(id, 30000, threadIdx, nullptr, [&](int, int) {
+		isDead = false;
+		});
 }
 
 void NonPlayer::WakeUpNpc(int threadIdx) {
@@ -333,17 +337,21 @@ void NonPlayer::WakeUpNpc(int threadIdx) {
 		bool old_state = false;
 		if (true == std::atomic_compare_exchange_strong(&isActive, &old_state, true)){
 			//std::cout << "wake up id: " << id << " is active: " << isActive << std::endl;
-			prevLoopTime = system_clock::now();
+			InitSector();
+			Sector::GetViewListFromSector(id, newViewList);
+			for(auto viewId : newViewList){
+				Actor::Get(viewId)->AddToViewSet(id, threadIdx);
+			}
 			AddNpcLoopEvent(threadIdx);
 		}
 	}
 }
 
-void NonPlayer::SleepNpc() {
+void NonPlayer::SleepNpc(int threadIdx) {
 	using namespace std::chrono;
 	//std::cout << "SleepNpc id: " << id << " is active: " << isActive << std::endl;
 	isActive = false;
-	prevLoopTime = system_clock::now() + 2000ms;
+	RemoveFromAll(threadIdx);
 }
 
 void NonPlayer::LuaLock() {
@@ -395,7 +403,7 @@ void NonPlayer::SetPos(int x, int y, int threadIdx) {
 #endif // NPCLOG
 
 	if (newViewList.empty()) {
-		SleepNpc(); // 아무도 보이지 않으므로 취침
+		SleepNpc(threadIdx); // 아무도 보이지 않으므로 취침
 #ifdef NPCLOG
 		cout << " & 아무에게도 안보여서 취침" << endl;
 #endif

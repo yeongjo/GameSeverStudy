@@ -207,7 +207,7 @@ int main() {
 
 	thread timer_thread(TimerQueueManager::Do);
 	vector <thread> worker_threads;
-	for (int i = 0; i < 4; ++i){
+	for (int i = 0; i < THREAD_COUNT; ++i){ // 코어수만큼하는게 효과 젤좋았음
 		int i2 = i;
 		worker_threads.emplace_back(Worker, hIocp, i2);
 	}

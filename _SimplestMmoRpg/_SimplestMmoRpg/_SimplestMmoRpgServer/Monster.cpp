@@ -75,19 +75,19 @@ void Monster::Update(int threadIdx) {
 	{
 		std::lock_guard<std::mutex> lockLua(luaLock);
 		lua_getglobal(L, "Tick");
-		{
-			std::lock_guard<std::mutex> lockViewSet(viewSetLock);
-			if (viewSet.empty()) {
-				SleepNpc();
-				lua_pop(L, 1);
-				return;
-			}
+		viewSetLock.lock();
+		if (viewSet.empty()) {
+			viewSetLock.unlock();
+			SleepNpc(threadIdx);
+			lua_pop(L, 1);
+			return;
 		}
+		viewSetLock.unlock();
 		CallLuaFunction(L, 0, 0);
 	}
 
 	PathFindHelper::FindStatus findWay = PathFindHelper::FindStatus::CantFindWay;
-	for (size_t i = 0; i < VIEW_RADIUS; i++) {
+	for (size_t i = 0; i < VIEW_RADIUS*3; i++) {
 		//for (size_t i = 0; i < 100; i++) {
 		findWay = pathFindHelper->FindWayOnce();
 		if (PathFindHelper::FindStatus::Finding < findWay) { // 찾거나 찾을수 없었음

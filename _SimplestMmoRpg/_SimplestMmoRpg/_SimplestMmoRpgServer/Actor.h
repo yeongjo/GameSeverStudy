@@ -11,9 +11,11 @@ struct MiniOver;
 class Actor {
 protected:
 	int		id;
-	char name[MAX_NAME];
+	char	name[MAX_NAME];
 	short	x, y, initX, initY;
 	int		moveTime;
+	int		timerId = 0;
+	bool	isDead = false;
 
 	/// <summary>
 	/// oldNewViewListLock으로 잠궈주고 사용
@@ -41,6 +43,8 @@ public:
 	virtual void Init();
 
 	void InitSector() const;
+
+	virtual void Respawn();
 
 	void RemoveFromSector() const;
 
@@ -115,7 +119,9 @@ public:
 	virtual int GetLevel();
 	virtual int GetExp();
 	virtual int GetDamage();
+	int GetTimerId() { return timerId; }
 	virtual MiniOver* GetOver(int threadIdx);
+	bool IsDead() { return isDead; }
 
 	static Actor* Get(int id);
 protected:

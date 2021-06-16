@@ -8,7 +8,7 @@ struct Session;
 struct BufOver;
 struct BufOverManager;
 
-constexpr auto GLOBAL_RECYCLE_REMAIN_COUNT = 30;
+constexpr auto GLOBAL_RECYCLE_REMAIN_COUNT = 1000;
 
 struct SendBuffer {
 	std::vector<unsigned char> sendingBuf;
@@ -32,7 +32,6 @@ private:
 	Player* player;
 	int id;
 	int globalRecycleRemainCount = GLOBAL_RECYCLE_REMAIN_COUNT;
-	std::chrono::system_clock::time_point lastSendTime;
 	static size_t EX_OVER_SIZE_INCREMENT;
 
 public:

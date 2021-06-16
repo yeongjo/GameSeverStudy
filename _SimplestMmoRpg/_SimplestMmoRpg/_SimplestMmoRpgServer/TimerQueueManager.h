@@ -21,6 +21,7 @@ struct TimerEvent {
 	MiniOver* bufOver;
 	char buffer[MESSAGE_MAX_BUFFER];
 	bool hasBuffer;
+	int actorTimerId; // 액터와 비교해서 액터 숫자가 높으면 큐가 끝나도 폐기한다
 
 	constexpr bool operator<(const TimerEvent& L) const;
 
@@ -75,7 +76,7 @@ class TimerQueueManager {
 public:
 	static void Add(TimerEvent& event, int threadIdx);
 
-	static void RemoveAll(int playerId); // TODO 다 지우는거 대체할방법 생각하기
+	//static void RemoveAll(int playerId); // TODO 다 지우는거 대체할방법 생각하기
 
 	static void Add(int obj, int delayMs, int threadIdx, TimerEventCheckCondition checkCondition, iocpCallback callback);
 

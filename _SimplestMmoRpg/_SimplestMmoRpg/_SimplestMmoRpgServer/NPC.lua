@@ -12,7 +12,7 @@ end
 function OnNearActorWithPlayerMove(playerId, threadIdx)
 	playerX = LuaGetX(playerId)
 	playerY = LuaGetY(playerId)
-	--API_print(tostring(playerX)..", "..tostring(mX).."\n")
+	--LuaPrint("OnNearActorWithPlayerMove: "..tostring(playerX)..", "..tostring(mX).."\n")
 
 	if(playerX == mX and playerY == mY) then
 		LuaSendMess(playerId, mId, "HELLO", threadIdx)

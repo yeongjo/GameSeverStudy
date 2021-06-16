@@ -163,30 +163,22 @@ void BufOverManager::SendAddedData(int threadIdx) {
 		return;
 	}
 	auto exOver = Get(threadIdx);
-	for (size_t i = 0; i < THREAD_COUNT; i++) {
-		sendBufs[i].dataLock.lock();
-	}
+	exOver->packetBuf.clear();
 	auto bufPtr = 0;
-	auto totalSize = 0;
 	for (size_t i = 0; i < THREAD_COUNT; i++){
 		int size;
 		{
-			//std::lock_guard<std::mutex> lock(sendBufs[i].dataLock);
+			std::lock_guard<std::mutex> lock(sendBufs[i].dataLock);
 			size = sendBufs[i].sendingBuf.size();
 			if (size == 0) {
 				continue;
 			}
-			totalSize += size;
-			exOver->packetBuf.resize(totalSize);
-			memcpy(&exOver->packetBuf[bufPtr], &sendBufs[i].sendingBuf[0], size*sizeof(unsigned char));
+			exOver->packetBuf.insert(exOver->packetBuf.end(), sendBufs[i].sendingBuf.begin(), sendBufs[i].sendingBuf.end());
 			sendBufs[i].sendingBuf.clear();
 		}
 		bufPtr += size;
 	}
-	for (size_t i = 0; i < THREAD_COUNT; i++) {
-		sendBufs[i].dataLock.unlock();
-	}
-	auto size = totalSize;
+	auto size = exOver->packetBuf.size();
 	if(size == 0){
 		return;
 	}
@@ -198,11 +190,11 @@ void BufOverManager::SendAddedData(int threadIdx) {
 	//}};
 	exOver->callback = EmptyFunction;
 	exOver->wsabuf[0].buf = reinterpret_cast<CHAR*>(&exOver->packetBuf[0]);
-	exOver->wsabuf[0].len = exOver->packetBuf.size();
+	exOver->wsabuf[0].len = size;
 
-	std::vector<unsigned char> debugPacket;
-	debugPacket.resize(size);
-	memcpy(&debugPacket[0], &exOver->packetBuf[0], size);
+#ifdef PACKETLOG
+	std::vector<unsigned char> debugPacket(exOver->packetBuf.begin(), exOver->packetBuf.end());
+#endif
 
 	int ret;
 	{
@@ -219,6 +211,7 @@ void BufOverManager::SendAddedData(int threadIdx) {
 		}
 	}
 
+#ifdef PACKETLOG
 	auto debugSize = size;
 	auto debugIndex = 0;
 	auto debugPacketPtr = &debugPacket[0];
@@ -234,4 +227,5 @@ void BufOverManager::SendAddedData(int threadIdx) {
 		debugPacketPtr += recvPacketSize;
 		debugIndex += recvPacketSize;
 	}
+#endif
 }
