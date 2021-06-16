@@ -75,7 +75,7 @@ void TimerQueueManager::Do() {
 				timerQueue.timerLock.lock();
 				if (timerQueue.empty() || now < timerQueue.top().startTime) {
 					timerQueue.timerLock.unlock();
-					std::this_thread::sleep_for(2ms);
+					std::this_thread::sleep_for(INVERSE_THREAD_TIME);
 					continue;
 				}
 				TimerEvent ev = timerQueue.top();

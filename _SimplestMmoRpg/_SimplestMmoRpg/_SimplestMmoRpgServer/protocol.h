@@ -3,7 +3,7 @@
 constexpr int MAX_STR_LEN = 50;
 constexpr int MAX_ID_LEN = 20;
 
-#define QUICKTEST
+//#define QUICKTEST
 //#define MEDIUMTEST // 워커 4개 최대 8377명  워커 3개 8190명
 #if defined(QUICKTEST)
 constexpr int MAX_USER = 30000;
