@@ -15,10 +15,11 @@ mFindPlayerAct = EFindPlayerAct_Peace
 ESoloMove_Fixing = 0
 ESoloMove_Roaming = 1
 mSoloMove = ESoloMove_Fixing
+mCanFindWay = false
 mTargetActorId = -1
-mPathTargetX = -1
+mIsFindTarget = -1
 mPathTargetY = -1
-
+mIsFindWayStart = false
 
 function SetId(x)
 	mId = x
@@ -26,14 +27,14 @@ function SetId(x)
 	mX = mInitX
 	mInitY = LuaGetY(mId)
 	mY = mInitY
-	--LuaPrint("SetId:"..mId..": "..mX..","..mY.."\n")
 	InitStat()
 end
 
-function Reset()
+function Reset(threadIdx)
 	mX = mInitX
 	mY = mInitY
-	LuaSetPos(mId, mX, mY)
+	mIsFindWayStart = false
+	LuaSetPos(mId, mX, mY, threadIdx)
 	InitStat()
 end
 
@@ -54,112 +55,10 @@ function Distance(x1, y1, x2, y2)
 	return math.sqrt(x*x+y*y)
 end
 
-function RandomMove()
-	randomDir = math.random(4)
-	if(randomDir == 1) then
-		mX = mX+1
-	elseif(randomDir == 2) then
-		mX = mX-1
-	elseif(randomDir == 3) then
-		mY = mY+1
-	else
-		mY = mY-1
-	end
-	if(LuaIsMovable(mX, mY)) then
-		LuaSetPos(mId, mX, mY)
-	end
-end
-
-function Tick(actorIdArray)
-	if(mFindPlayerAct == EFindPlayerAct_Peace) then
-		if(mTargetActorId ~= -1) then
-			targetActorX = LuaGetX(mTargetActorId)
-			targetActorY = LuaGetY(mTargetActorId)
-			--LuaPrint(mTargetActorId..": "..targetActorX..","..targetActorY.."\n")
-		else
-			if(ESoloMove_Roaming == mSoloMove) then
-				LuaPrint("RandomMove:"..mId..": "..mX..","..mY.."\n")
-				RandomMove()
-				LuaPrint("after RandomMove:"..mId..": "..mX..","..mY.."\n")
-			end
-			return
-		end
-	elseif(mTargetActorId == -1) then
-		--LuaPrint("CALL tick: "..mX..","..mY.."\n")
-		minDistance = mAgroDistance
-		targetActorX = -1
-		targetActorY = -1
-		minTargetId = -1
-		for i = 1, #actorIdArray do
-			local actorId = actorIdArray[i]
-			--LuaPrint("tick loop["..i)
-			--LuaPrint("]: "..actorId.."\n")
-			actorX = LuaGetX(actorId)
-			actorY = LuaGetY(actorId)
-			curDistance = Distance(mX, mY, actorX, actorY)
-			if(minDistance > curDistance) then
-				minDistance = curDistance
-				targetActorX = actorX
-				targetActorY = actorY
-				minTargetId = actorId
-			end
-		end
-		mTargetActorId = minTargetId
-		if(targetActorX == -1 or targetActorY == -1) then
-			--어그로 안끌릴때 행동
-			if(ESoloMove_Roaming == mSoloMove) then
-				RandomMove()
-			end
-			return
-		end
-	end
-	
-	-- 플레이어에게 다가가는 행동
-	if(mPathTargetX == -1) then
-		mPathTargetX = targetActorX
-		mPathTargetY = targetActorY
-		LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
-	end
-	LuaPrint("x: "..mX.." y:"..mY.." mPathTargetX: "..mPathTargetX.." mPathTargetY:"..mPathTargetY.."\n")
-	if(mX == mPathTargetX and mY == mPathTargetY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
-		mPathTargetX = LuaGetX(mTargetActorId)
-		targetActorX = mPathTargetX
-		mPathTargetY = LuaGetY(mTargetActorId)
-		targetActorY = mPathTargetY
-		LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
-	end
-	--[[
-	if(targetActorX - mX > 0) then
-		mX = mX+1
-	elseif(targetActorX - mX < 0) then
-		mX = mX-1
-	elseif(targetActorY - mY > 0) then
-		mY = mY+1
-	elseif(targetActorY - mY < 0) then
-		mY = mY-1
-	end
-	if(LuaIsMovable(mX, mY)) then
-		LuaSetPos(mId, mX, mY)
-	end
-	]]
-end
-
-function OnNearActorWithPlayerMove(playerId)
-end
-
-function OnNearActorWithSelfMove(playerId)
-	playerX = LuaGetX(playerId)
-	playerY = LuaGetY(playerId)
-
-	if(playerX == mX) then
-		if(playerY == mY) then
-			LuaTakeDamage(playerId, mId)
-		end
-	end
-end
-
-function TakeDamage(playerId, damage)
+function TakeDamage(playerId, damage, threadIdx)
 	result = true
+	targetActorX = LuaGetX(playerId)
+	targetActorY = LuaGetY(playerId)
 	mTargetActorId = playerId
 	mHp = mHp - damage
 	if(mHp <= 0) then
@@ -168,10 +67,64 @@ function TakeDamage(playerId, damage)
 		playerlevel = LuaGetLevel(playerId)
 		playerexp = LuaGetExp(playerId)
 		playerexp = playerexp + mExp
-		LuaSendStatChange(playerId, mId, playerhp, playerlevel, playerexp); -- 경험치 습득
+		LuaSendStatChange(playerId, mId, playerhp, playerlevel, playerexp, threadIdx); -- 경험치 습득
 		result = false
 	end
-	--LuaPrint("take_damage("..playerId..":"..damage..","..mHp..")\n")
-	LuaSendStatChange(mId, mId, mHp, mLevel, mExp);
+	LuaSendStatChange(mId, mId, mHp, mLevel, mExp, threadIdx);
 	return result
+end
+
+function OnNearActorWithPlayerMove(playerId, threadIdx)
+end
+
+function Tick(threadIdx)
+	if(mTargetActorId ~= -1) then
+		otherX = LuaGetX(mTargetActorId)
+		otherY = LuaGetY(mTargetActorId)
+
+		if(otherX == mX and otherY == mY) then
+			LuaTakeDamage(mTargetActorId, mId, threadIdx)
+		end
+	end
+
+	if(EFindPlayerAct_Peace == mFindPlayerAct) then
+		if(ESoloMove_Roaming == mSoloMove) then -- 로밍
+			LuaRandomMove(mId, threadIdx)
+		end
+	else -- 근처가면 어그로 끌린다
+		if(-1 == mTargetActorId) then
+			nearestPlayer = LuaGetNearPlayer(mId)
+			if(-1 ~= nearestPlayer) then
+				targetActorX = LuaGetX(nearestPlayer)
+				targetActorY = LuaGetY(nearestPlayer)
+				mTargetActorId = nearestPlayer
+			else
+				--어그로 안끌릴때 행동
+				if(ESoloMove_Roaming == mSoloMove) then
+					LuaRandomMove(mId, threadIdx)
+				end
+			end
+		end
+	end
+	
+	-- 플레이어에게 다가가는 행동
+	if(mCanFindWay == true) then -- 길찾기 가능
+		if(mTargetActorId ~= -1) then
+			if(mIsFindWayStart == false) then
+				LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+				mIsFindWayStart = true
+				--LuaPrint("LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
+			elseif(mX == targetActorX and mY == targetActorY) then -- 목표에 도착하면 목표가 이동했을지도 모르는 위치로 이동한다
+				targetActorX = LuaGetX(mTargetActorId)
+				targetActorY = LuaGetY(mTargetActorId)
+				LuaSetPathStartAndTarget(mId, targetActorX, targetActorY)
+				--LuaPrint("mX == targetActorX and mY == targetActorY LuaSetPathStartAndTarget("..mId..", "..targetActorX..", "..targetActorY..")\n");
+			end
+		end
+	elseif(mTargetActorId ~= -1) then
+		-- 길 못 찾는 몬스터
+		targetActorX = LuaGetX(mTargetActorId)
+		targetActorY = LuaGetY(mTargetActorId)
+		LuaMoveToConsiderWall(mId, targetActorX, targetActorY, threadIdx)
+	end
 end
