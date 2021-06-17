@@ -93,8 +93,14 @@ void Player::AddToViewSet(int otherId, int threadIdx) {
 }
 
 void Player::RemoveFromViewSet(int otherId, int threadIdx) {
-	std::lock_guard<std::mutex> lock(viewSetLock);
-	RemoveFromViewSetWithoutLock(otherId, threadIdx);
+	viewSetLock.lock();
+	if (0 != viewSet.count(otherId)) {
+		viewSet.erase(otherId);
+		viewSetLock.unlock();
+		SendRemoveActor(otherId, threadIdx);
+		return;
+	}
+	viewSetLock.unlock();
 }
 
 void Player::RemoveFromViewSetWithoutLock(int otherId, int threadIdx) {
@@ -224,8 +230,8 @@ void Player::SetPos(int x, int y, int threadIdx) {
 	Sector::Move(id, prevX, prevY, x, y);
 	
 	std::lock_guard<std::mutex> lock(oldNewViewListLock);
-	Sector::GetViewListFromSector(id, newViewList);
 	CopyViewSet(oldViewList);
+	Sector::GetViewListFromSector(id, newViewList);
 
 	for (auto otherId : newViewList) {
 		if (oldViewList.end() == std::find(oldViewList.begin(), oldViewList.end(), otherId)) {

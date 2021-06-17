@@ -6,8 +6,8 @@ constexpr int MAX_ID_LEN = 20;
 //#define QUICKTEST
 //#define MEDIUMTEST // 워커 4개 최대 8377명  워커 3개 8190명
 #if defined(QUICKTEST)
-constexpr int MAX_USER = 30000;
-constexpr int NPC_ID_START = 10000;
+constexpr int MAX_USER = 60000;
+constexpr int NPC_ID_START = 5000;
 #define WORLD_WIDTH		2000
 #define WORLD_HEIGHT	2000
 #elif defined(MEDIUMTEST)
@@ -26,7 +26,7 @@ constexpr int NPC_ID_START = 10000;		// NPC의 ID가 시작하는 지점, 따라서 플레이�
 
 
 	
-#define VIEW_RADIUS		15
+#define VIEW_RADIUS		30
 constexpr int HALF_VIEW_RADIUS = VIEW_RADIUS/2;
 
 #define SERVER_PORT		3500

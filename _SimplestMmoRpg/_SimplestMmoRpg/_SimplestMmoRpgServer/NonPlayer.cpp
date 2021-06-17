@@ -387,8 +387,8 @@ void NonPlayer::SetPos(int x, int y, int threadIdx) {
 	Sector::Move(id, prevX, prevY, x, y);
 
 	std::lock_guard<std::mutex> lock(oldNewViewListLock);
-	Sector::GetViewListFromSector(id, newViewList);
 	CopyViewSet(oldViewList);
+	Sector::GetViewListFromSector(id, newViewList);
 #ifdef NPCLOG
 	lock_guard<mutex> coutLock{ coutMutex };
 	cout << "npc[" << id << "] (" << x << "," << y << ") ÀÌµ¿ " << oldViewList.size() << "¸í[";

@@ -64,7 +64,7 @@ void Actor::Die(int threadIdx) {
 }
 
 void Actor::RemoveFromAll(int threadIdx) {
-	RemoveFromSector();
+	//RemoveFromSector();
 	Respawn();
 	viewSetLock.lock();
 	for (auto viewId : viewSet) {
